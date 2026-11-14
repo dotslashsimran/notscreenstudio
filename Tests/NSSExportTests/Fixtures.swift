@@ -4,6 +4,7 @@ import Foundation
 import NSSCore
 import NSSRender
 import VideoToolbox
+@testable import NSSExport
 
 /// Whether this machine has an encoder for `codec` (CI VMs may lack one).
 func canEncode(_ codec: CMVideoCodecType) -> Bool {
@@ -161,4 +162,65 @@ final class Collector: @unchecked Sendable {
     private var _events: [ExportProgress] = []
     var events: [ExportProgress] { lock.lock(); defer { lock.unlock() }; return _events }
     func add(_ e: ExportProgress) { lock.lock(); _events.append(e); lock.unlock() }
+}
+
+/// Writes a variable frame rate movie: frame `k` is shown at `pts[k]` seconds, gray `16 * k + 8`,
+/// like a ScreenCaptureKit recording of a static screen (long gaps between frames).
+func writeSparseVideo(to url: URL, pts: [Double], endTime: Double, width: Int = 320, height: Int = 180) async throws {
+    let writer = try AVAssetWriter(outputURL: url, fileType: .mov)
+    let input = AVAssetWriterInput(mediaType: .video, outputSettings: [
+        AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: width, AVVideoHeightKey: height,
+        AVVideoCompressionPropertiesKey: [AVVideoAllowFrameReorderingKey: false],
+    ])
+    let adaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: input, sourcePixelBufferAttributes: [
+        kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+        kCVPixelBufferWidthKey as String: width, kCVPixelBufferHeightKey as String: height,
+    ])
+    writer.add(input)
+    writer.startWriting()
+    writer.startSession(atSourceTime: .zero)
+    for (k, t) in pts.enumerated() {
+        while !input.isReadyForMoreMediaData { try await Task.sleep(for: .milliseconds(1)) }
+        let pb = try PixelBuffers.make(width: width, height: height)
+        CVPixelBufferLockBaseAddress(pb, [])
+        memset(CVPixelBufferGetBaseAddress(pb)!, Int32(16 * k + 8), CVPixelBufferGetBytesPerRow(pb) * height)
+        CVPixelBufferUnlockBaseAddress(pb, [])
+        adaptor.append(pb, withPresentationTime: CMTime(seconds: t, preferredTimescale: 600))
+    }
+    input.markAsFinished()
+    writer.endSession(atSourceTime: CMTime(seconds: endTime, preferredTimescale: 600))
+    await writer.finishWriting()
+    if writer.status != .completed { throw writer.error ?? NSSError.io("sparse video failed") }
+}
+
+/// Gray index (value / 16) of the middle pixel.
+func grayIndex(_ pb: CVPixelBuffer) -> Int {
+    CVPixelBufferLockBaseAddress(pb, .readOnly); defer { CVPixelBufferUnlockBaseAddress(pb, .readOnly) }
+    let base = CVPixelBufferGetBaseAddress(pb)!.assumingMemoryBound(to: UInt8.self)
+    let mid = CVPixelBufferGetBytesPerRow(pb) * (CVPixelBufferGetHeight(pb) / 2) + (CVPixelBufferGetWidth(pb) / 2) * 4
+    return Int(base[mid]) / 16
+}
+
+/// A source that hands out frames but reports a decode error after `failAfter` requests,
+/// like a reader that failed mid-file while still holding its last good frame.
+final class FailingFrameSource: FrameSource, DecodeErrorReporting, @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+    private let failAfter: Int
+    private let frame: CVPixelBuffer
+    init(failAfter: Int) throws {
+        self.failAfter = failAfter
+        frame = try PixelBuffers.make(width: 64, height: 36)
+    }
+    private func bump() { lock.lock(); count += 1; lock.unlock() }
+    func screenFrame(at t: MediaTime) async -> CVPixelBuffer? {
+        bump()
+        return frame
+    }
+    func cameraFrame(at t: MediaTime) async -> CVPixelBuffer? { nil }
+    var screenError: NSSError? {
+        lock.lock(); defer { lock.unlock() }
+        return count > failAfter ? .io("simulated decode failure") : nil
+    }
+    var cameraError: NSSError? { nil }
 }

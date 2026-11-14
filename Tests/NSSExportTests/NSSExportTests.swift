@@ -196,6 +196,69 @@ private func near(_ a: Double, _ b: Double, _ tol: Double) -> Bool { abs(a - b) 
         #expect(source.screenError == nil)
     }
 
+    @Test(.enabled(if: h264Available))
+    func sparseSourceReturnsAtOrBeforeFrameBeyondLeadIn() async throws {
+        // Frames at 0 s, 0.5 s and 3 s (variable frame rate). At t = 2.5 the at-or-before frame is the
+        // 0.5 s one, 2 s behind the request, which is more than the 1 s restart lead-in.
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("screen.mov")
+        try await writeSparseVideo(to: url, pts: [0, 0.5, 3.0], endTime: 3.2)
+        let source = try await AssetFrameSource.make(screenURL: url)
+        #expect(await source.screenFrame(at: 2.5).map(grayIndex) == 1)
+        #expect(await source.screenFrame(at: 2.9).map(grayIndex) == 1)
+        #expect(await source.screenFrame(at: 3.0).map(grayIndex) == 2)
+        #expect(await source.screenFrame(at: 0.2).map(grayIndex) == 0)   // backward
+        #expect(await source.screenFrame(at: 2.5).map(grayIndex) == 1)   // forward jump past the lead-in
+        #expect(source.screenError == nil)
+    }
+
+    @Test(.enabled(if: h264Available))
+    func exportWithSparseSourceAndLateTrimStart() async throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try await writeSparseVideo(to: dir.appendingPathComponent("screen.mov"), pts: [0, 0.5, 3.0], endTime: 3.2)
+        var project = Project(name: "t", assets: RecordingAssets(sourcePixelSize: PixelSize(width: 320, height: 180), frameRate: 30, duration: 3.2),
+                              timeline: Timeline(trim: TrimRange(start: 2.95, end: 3.05)))
+        project.style.aspectRatio = .r16x9
+        let renderer = RecordingRenderer()
+        try await MP4Exporter(renderer: renderer).export(project: project, projectURL: dir, track: .empty, preset: ExportPreset(),
+                                                         to: dir.appendingPathComponent("o.mp4"), progress: { _ in })
+        // 6 frames at 2.95, 2.967, 2.983, 3.0, 3.017, 3.033: the 0.5 s frame, then the 3 s frame. Never a future one.
+        #expect(renderer.calls.map { $0.gray / 16 } == [1, 1, 1, 2, 2, 2])
+    }
+
+    @Test(.enabled(if: h264Available))
+    func holdsFirstFrameBeforeTrackStartWithoutRestarting() async throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("screen.mov")
+        try await writeSparseVideo(to: url, pts: [1.0, 1.5], endTime: 2.0)
+        let source = try await AssetFrameSource.make(screenURL: url)
+        #expect(await source.screenFrame(at: 0.2).map(grayIndex) == 0)
+        #expect(await source.screenFrame(at: 0.3).map(grayIndex) == 0)
+        #expect(await source.screenFrame(at: 1.2).map(grayIndex) == 0)
+        #expect(await source.screenFrame(at: 1.6).map(grayIndex) == 1)
+    }
+
+    @Test(.enabled(if: h264Available))
+    func decodeFailureMidExportFailsAndLeavesNoFile() async throws {
+        let b = try await makeBundle()
+        defer { try? FileManager.default.removeItem(at: b.dir) }
+        let out = b.dir.appendingPathComponent("fail.mp4")
+        let events = Collector()
+        let failing = try FailingFrameSource(failAfter: 3)
+        await #expect(throws: NSSError.self) {
+            try await MP4Exporter(frameSourceFactory: { _, _ in failing }).export(
+                project: b.project, projectURL: b.dir, track: .empty, preset: ExportPreset(), to: out, progress: { events.add($0) })
+        }
+        #expect(!FileManager.default.fileExists(atPath: out.path))
+        let leftovers = (try? FileManager.default.contentsOfDirectory(atPath: b.dir.path)) ?? []
+        #expect(!leftovers.contains { $0.contains("partial") })
+        if case .failed(let message)? = events.events.last { #expect(message.contains("simulated decode failure")) } else { Issue.record("expected .failed") }
+        #expect(!events.events.contains { if case .finished = $0 { true } else { false } })
+    }
+
     @Test func bitratesScaleWithResolution() {
         let hd = MP4Exporter.bitrate(size: PixelSize(width: 1920, height: 1080), fps: 60, codec: .h264)
         let uhd = MP4Exporter.bitrate(size: PixelSize(width: 3840, height: 2160), fps: 60, codec: .h264)

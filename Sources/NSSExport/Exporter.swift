@@ -18,6 +18,11 @@ public protocol Exporter: Sendable {
     ) async throws
 }
 
-/// Source-compatibility alias: NSSUI/Editor still constructs `StubExporter(motionFactory:renderer:)`.
-/// It is now the real exporter. New code should use `MP4Exporter` directly.
-public typealias StubExporter = MP4Exporter
+/// A `FrameSource` that can fail mid-stream. The `FrameSource` API can only return nil, so the exporter
+/// polls this after every frame request and aborts with the error instead of exporting held frames.
+public protocol DecodeErrorReporting: Sendable {
+    /// First decode error seen on the screen stream, if any.
+    var screenError: NSSError? { get }
+    /// First decode error seen on the camera stream, if any.
+    var cameraError: NSSError? { get }
+}

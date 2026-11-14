@@ -13,7 +13,7 @@ import NSSCore
 /// Access is expected to be (mostly) forward in time, which is what an export does. A backward jump, or a
 /// jump far ahead, restarts the reader a little before the requested time. One instance owns its readers
 /// and is safe to call from any thread: calls are serialized per track with a lock.
-public final class AssetFrameSource: FrameSource, @unchecked Sendable {
+public final class AssetFrameSource: FrameSource, DecodeErrorReporting, @unchecked Sendable {
     private let screen: SequentialVideoReader
     private let camera: SequentialVideoReader?
 
@@ -67,6 +67,10 @@ final class SequentialVideoReader: @unchecked Sendable {
     private var next: Frame?
     /// Last frame before a restart: held when the restarted reader finds nothing (a request past the end).
     private var fallback: Frame?
+    /// PTS of the first frame of the track, once a reader that started at 0 has produced it.
+    private var firstPTS: Double?
+    /// Start of the current reader's time range, seconds.
+    private var readerStart: Double = 0
     private var exhausted = false
     private var failed = false
     private var _lastError: NSSError?
@@ -107,31 +111,47 @@ final class SequentialVideoReader: @unchecked Sendable {
 
     func frame(at t: Double) -> CVPixelBuffer? {
         lock.lock(); defer { lock.unlock() }
-        if failed { return current?.buffer }
-        if needsRestart(for: t) { restart(at: t) }
-        while true {
-            if next == nil, !exhausted { next = readFrame() }
-            guard let n = next, n.pts <= t else { break }
-            current = n
-            next = nil
+        if failed { return nil }
+        if needsRestart(for: t) { restart(at: t, leadIn: restartLeadIn) }
+        advance(to: t)
+        // Sparse (variable frame rate) sources: the sample at or before t may start before the reader's
+        // range. If the reader only found later frames, widen the lead-in until one at or before t shows
+        // up, down to 0 (start of file).
+        var lead = restartLeadIn
+        while !failed, current == nil, let n = next, n.pts > t, readerStart > 0 {
+            lead *= 4
+            restart(at: t, leadIn: lead)
+            advance(to: t)
         }
-        // t is before the very first frame: hold the first one.
+        if failed { return nil }
+        // t is before the very first frame of the track: hold it (nothing earlier exists).
         if current == nil, let n = next {
             current = n
             next = nil
         }
         if let c = current { fallback = nil; return c.buffer }
-        return fallback?.buffer
+        if let f = fallback, f.pts <= t { return f.buffer }
+        return nil
+    }
+
+    private func advance(to t: Double) {
+        while !failed {
+            if next == nil, !exhausted { next = readFrame() }
+            guard let n = next, n.pts <= t else { break }
+            current = n
+            next = nil
+        }
     }
 
     private func needsRestart(for t: Double) -> Bool {
         guard reader != nil else { return true }
-        if let c = current, t < c.pts { return true }
+        // A held first frame (t before the track's first frame) is not a reason to restart.
+        if let c = current, t < c.pts, c.pts != firstPTS { return true }
         if let n = next, t - n.pts > jumpThreshold { return true }
         return false
     }
 
-    private func restart(at t: Double) {
+    private func restart(at t: Double, leadIn: Double) {
         reader?.cancelReading()
         if let c = current ?? next { fallback = c }
         reader = nil; output = nil; current = nil; next = nil; exhausted = false
@@ -145,7 +165,8 @@ final class SequentialVideoReader: @unchecked Sendable {
             out.alwaysCopiesSampleData = false
             guard reader.canAdd(out) else { throw NSSError.unsupported("Cannot decode \(url.lastPathComponent)") }
             reader.add(out)
-            let start = max(0, min(t, trackEnd) - restartLeadIn)
+            let start = max(0, min(t, trackEnd) - leadIn)
+            readerStart = start
             reader.timeRange = CMTimeRange(start: CMTime(seconds: start, preferredTimescale: 60_000), duration: .positiveInfinity)
             guard reader.startReading() else {
                 throw NSSError.io("Cannot read \(url.lastPathComponent): \(reader.error?.localizedDescription ?? "unknown error")")
@@ -161,7 +182,9 @@ final class SequentialVideoReader: @unchecked Sendable {
         guard let output, let reader else { exhausted = true; return nil }
         while let sample = output.copyNextSampleBuffer() {
             guard let image = CMSampleBufferGetImageBuffer(sample) else { continue }
-            return Frame(pts: CMSampleBufferGetPresentationTimeStamp(sample).seconds, buffer: image)
+            let pts = CMSampleBufferGetPresentationTimeStamp(sample).seconds
+            if readerStart == 0, firstPTS == nil { firstPTS = pts }
+            return Frame(pts: pts, buffer: image)
         }
         exhausted = true
         if reader.status == .failed {

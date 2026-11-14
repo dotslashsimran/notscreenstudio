@@ -141,10 +141,11 @@ public struct MP4Exporter: Exporter {
             try Task.checkCancellation()
             let t = start + Double(i) / Double(fps)
             let state = motion.frameState(at: t)
-            guard let screen = await frames.screenFrame(at: t) else {
-                throw NSSError.io((frames as? AssetFrameSource)?.screenError?.messageText ?? "No screen frame at \(t) s")
-            }
+            let screenFrame = await frames.screenFrame(at: t)
             let camera = await frames.cameraFrame(at: t)
+            // A decode failure must abort the export, even if the source still hands back a held frame.
+            if let reporter = frames as? any DecodeErrorReporting, let e = reporter.screenError ?? reporter.cameraError { throw e }
+            guard let screen = screenFrame else { throw NSSError.io("No screen frame at \(t) s") }
 
             try await waitUntilReady(videoInput, writer: writer)
             var out: CVPixelBuffer?
@@ -166,6 +167,7 @@ public struct MP4Exporter: Exporter {
         if let audio {
             while !audio.isFinished {
                 try Task.checkCancellation()
+                if writer.status == .failed || writer.status == .cancelled { throw Self.writerError(writer, "Writer stopped") }
                 try audio.drain(upTo: nil, writer: writer)
                 if !audio.isFinished { try await Task.sleep(for: .milliseconds(1)) }
             }
