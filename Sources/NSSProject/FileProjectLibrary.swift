@@ -133,8 +133,18 @@ public actor FileProjectLibrary: ProjectLibrary {
     public func rename(_ summary: ProjectSummary, to name: String) async throws {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { throw NSSError.invalidProject("A name can't be empty") }
-        guard var project = readProject(in: summary.bundle.url) else {
-            throw NSSError.invalidProject("Project bundle not found: \(summary.bundle.url.lastPathComponent)")
+        // Primary file only: never rewrite project.json from an older backup (see FileProjectStore.load).
+        let primary = summary.bundle.url.appendingPathComponent(ProjectReference.projectFileName)
+        guard let data = try? Data(contentsOf: primary) else {
+            throw NSSError.invalidProject("Missing \(ProjectReference.projectFileName) in \(summary.bundle.url.lastPathComponent)")
+        }
+        var project: Project
+        do {
+            project = try JSONDecoder().decode(Project.self, from: try migrator.migrate(data))
+        } catch let e as ProjectMigrationError {
+            throw NSSError.invalidProject("\(e)")
+        } catch {
+            throw NSSError.invalidProject("Corrupt \(ProjectReference.projectFileName): \(error.localizedDescription)")
         }
         guard project.name != trimmed else { return }
         project.name = trimmed

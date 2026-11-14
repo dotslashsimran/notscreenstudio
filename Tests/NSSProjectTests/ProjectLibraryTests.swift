@@ -91,6 +91,21 @@ private func makeBundle(in library: URL, name: String, created: Date, duration: 
         await #expect(throws: NSSError.self) { try await lib.rename(s, to: "   ") }
     }
 
+    @Test(arguments: ["{\"schemaVersion\": 99, \"name\": \"x\"}", "not json at all"])
+    func renameRefusesUnreadablePrimaryAndKeepsItUntouched(content: String) async throws {
+        let dir = tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let bundle = try await makeBundle(in: dir, name: "a", created: Date())
+        let primary = bundle.appendingPathComponent("project.json")
+        // Valid backup, unreadable primary.
+        try FileManager.default.copyItem(at: primary, to: bundle.appendingPathComponent("project.json.bak"))
+        try Data(content.utf8).write(to: primary)
+        let lib = FileProjectLibrary(libraryURL: dir)
+        let s = try #require(try await lib.summaries().first)   // listing may use the backup
+        await #expect(throws: NSSError.self) { try await lib.rename(s, to: "New") }
+        #expect(try Data(contentsOf: primary) == Data(content.utf8))
+    }
+
     @Test func deleteMovesToTrashHook() async throws {
         let dir = tempDir()
         defer { try? FileManager.default.removeItem(at: dir) }
