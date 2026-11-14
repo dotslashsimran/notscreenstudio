@@ -74,12 +74,17 @@ public protocol RecordingSession: Sendable {
     /// Start capturing into `bundleURL`. Writes screen.mov / camera.mov / mic.m4a there.
     func start(options: RecordingOptions, into bundleURL: URL) async throws
     /// Stop and finalize files; returns the assets (without cursor data, see `InputLogger`).
+    /// `RecordingAssets.startHostTime` is the host-clock time of the first screen frame (the t = 0 origin).
     func stop() async throws -> RecordingAssets
 }
 
 /// Logs mouse movement (~120 Hz) and clicks, in normalized source space (see `Basics.swift`).
 public protocol InputLogger: Sendable {
-    /// `source` determines the normalization rect.
+    /// `source` determines the normalization rect. The logger stamps every event with the host clock
+    /// (`CACurrentMediaTime()` seconds) while running; it does not guess the recording origin.
     func start(source: CaptureSource) async throws
-    func stop() async -> CursorTrack
+    /// Stops and returns the track REBASED by the logger: each `t` is (event host time minus
+    /// `recordingStartHostTime`), so t = 0 is the first screen frame (`RecordingAssets.startHostTime`),
+    /// same clock as `CACurrentMediaTime()`. Events before the origin are dropped or clamped to 0.
+    func stop(recordingStartHostTime: Double) async -> CursorTrack
 }

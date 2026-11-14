@@ -5,5 +5,5 @@ import NSSCore
 public actor NoopInputLogger: InputLogger {
     public init() {}
     public func start(source: CaptureSource) async throws {}
-    public func stop() async -> CursorTrack { .empty }
+    public func stop(recordingStartHostTime: Double) async -> CursorTrack { .empty }
 }

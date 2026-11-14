@@ -44,6 +44,11 @@ public struct RecordingAssets: Codable, Sendable, Equatable {
     public var frameRate: Double
     /// Duration in seconds of the recording.
     public var duration: MediaTime
+    /// Shared time origin (t = 0) of the recording: the host-clock time, in seconds on the
+    /// `CACurrentMediaTime()` / `CMClockGetHostTimeClock()` clock, of the presentation timestamp
+    /// of the FIRST screen frame written to `screenFile`. `RecordingSession.stop()` fills it.
+    /// Cursor/click timestamps are rebased to this origin by `InputLogger.stop(recordingStartHostTime:)`.
+    public var startHostTime: Double
 
     public static let defaultScreenFile = "screen.mov"
     public static let defaultCameraFile = "camera.mov"
@@ -57,7 +62,8 @@ public struct RecordingAssets: Codable, Sendable, Equatable {
         cursorFile: String = RecordingAssets.defaultCursorFile,
         sourcePixelSize: PixelSize,
         frameRate: Double,
-        duration: MediaTime
+        duration: MediaTime,
+        startHostTime: Double = 0
     ) {
         self.screenFile = screenFile
         self.cameraFile = cameraFile
@@ -66,6 +72,7 @@ public struct RecordingAssets: Codable, Sendable, Equatable {
         self.sourcePixelSize = sourcePixelSize
         self.frameRate = frameRate
         self.duration = duration
+        self.startHostTime = startHostTime
     }
 }
 
