@@ -104,7 +104,8 @@ import NSSProject
         // `prepare` runs concurrently with the countdown; `begin` only after it ended.
         #expect(!callsDuringCountdown.contains("begin"))
         let calls = try #require(rig.warm?.calls)
-        #expect(calls.first == "prepare")
+        #expect(calls.first == "preflight")
+        #expect(calls.firstIndex(of: "prepare")! > 0)
         #expect(calls.firstIndex(of: "begin")! > calls.firstIndex(of: "prepare")!)
         #expect(!calls.contains("start"))
         #expect(rig.model.isRecording)
