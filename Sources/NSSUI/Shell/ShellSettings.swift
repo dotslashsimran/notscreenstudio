@@ -18,7 +18,15 @@ public struct ShellSettings: Codable, Sendable, Equatable {
     public var bubbleSize: Double
     /// Bubble center, normalized to the capture source (0...1, origin top-left).
     public var bubbleCenter: NormalizedPoint
+    /// 0 = sharp corners, 1 = fully round. Same meaning as `CameraBubble.roundness`; ignored for the circle.
+    public var bubbleRoundness: Double
+    /// Seconds counted down after Record before capture starts. 0 = off.
+    public var countdownSeconds: Int
 
+    /// The choices offered in the menu.
+    public static let countdownChoices = [0, 3, 5]
+    public static let defaultCountdownSeconds = 3
+    public static let defaultBubbleRoundness = CameraBubble().roundness
     public static let defaultBubbleSize = 0.18
     public static let defaultBubbleCenter = NormalizedPoint(x: 0.88, y: 0.80)
 
@@ -30,7 +38,9 @@ public struct ShellSettings: Codable, Sendable, Equatable {
         cameraDeviceID: String? = nil,
         cameraShape: CameraShape = .circle,
         bubbleSize: Double = ShellSettings.defaultBubbleSize,
-        bubbleCenter: NormalizedPoint = ShellSettings.defaultBubbleCenter
+        bubbleCenter: NormalizedPoint = ShellSettings.defaultBubbleCenter,
+        bubbleRoundness: Double = ShellSettings.defaultBubbleRoundness,
+        countdownSeconds: Int = ShellSettings.defaultCountdownSeconds
     ) {
         self.source = source
         self.micEnabled = micEnabled
@@ -40,6 +50,8 @@ public struct ShellSettings: Codable, Sendable, Equatable {
         self.cameraShape = cameraShape
         self.bubbleSize = bubbleSize
         self.bubbleCenter = bubbleCenter
+        self.bubbleRoundness = bubbleRoundness
+        self.countdownSeconds = countdownSeconds
     }
 
     public init(from decoder: Decoder) throws {
@@ -52,6 +64,10 @@ public struct ShellSettings: Codable, Sendable, Equatable {
         cameraShape = try c.decodeIfPresent(CameraShape.self, forKey: .cameraShape) ?? .circle
         bubbleSize = try c.decodeIfPresent(Double.self, forKey: .bubbleSize) ?? Self.defaultBubbleSize
         bubbleCenter = try c.decodeIfPresent(NormalizedPoint.self, forKey: .bubbleCenter) ?? Self.defaultBubbleCenter
+        let r = try c.decodeIfPresent(Double.self, forKey: .bubbleRoundness) ?? Self.defaultBubbleRoundness
+        bubbleRoundness = min(max(r, 0), 1)
+        let n = try c.decodeIfPresent(Int.self, forKey: .countdownSeconds) ?? Self.defaultCountdownSeconds
+        countdownSeconds = Self.countdownChoices.contains(n) ? n : Self.defaultCountdownSeconds
     }
 }
 

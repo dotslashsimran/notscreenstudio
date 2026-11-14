@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import NSSCapture
 import NSSCore
 import NSSProject
 @testable import NSSUI
@@ -65,6 +66,12 @@ final class ShellFakeEffects: ShellEffects {
     var hudShown = false
     var bubbleShown = false
     var bubbleShape: CameraShape?
+    var bubbleRoundness: Double?
+    var countdownRuns: [Int] = []
+    var countdownResult = true
+    var countdownRect: CGRect?
+    var cancelCountdownCalls = 0
+    var onCountdown: (@MainActor () -> Void)?
     var shortcutRegistered = false
     var bubbleFrameValue: CGRect?
     var shownBubbleFrame: CGRect?
@@ -77,12 +84,17 @@ final class ShellFakeEffects: ShellEffects {
         hudShown = true; stop = onStop; discard = onDiscard
     }
     func hideHUD() { hudShown = false }
-    func showBubble(deviceID: String?, shape: CameraShape, frame: CGRect, sourceRect: CGRect) {
-        bubbleShown = true; bubbleShape = shape; shownBubbleFrame = frame
+    func showBubble(deviceID: String?, shape: CameraShape, roundness: Double, frame: CGRect, sourceRect: CGRect) {
+        bubbleShown = true; bubbleShape = shape; bubbleRoundness = roundness; shownBubbleFrame = frame
         if bubbleFrameValue == nil { bubbleFrameValue = frame }
     }
     func bubbleFrame() -> CGRect? { bubbleShown ? bubbleFrameValue : nil }
-    func updateBubbleShape(_ shape: CameraShape) { bubbleShape = shape }
+    func updateBubble(shape: CameraShape, roundness: Double) { bubbleShape = shape; bubbleRoundness = roundness }
+    func runCountdown(seconds: Int, over rect: CGRect) async -> Bool {
+        countdownRuns.append(seconds); countdownRect = rect; onCountdown?()
+        return countdownResult
+    }
+    func cancelCountdown() { cancelCountdownCalls += 1 }
     func hideBubble() { bubbleShown = false }
     func registerStopShortcut(_ handler: @escaping @MainActor () -> Void) { shortcutRegistered = true }
     func unregisterStopShortcut() { shortcutRegistered = false }
@@ -93,6 +105,7 @@ final class ShellFakeEffects: ShellEffects {
 struct ShellRig {
     let model: ShellModel
     let session: ShellFakeSession
+    let warm: ShellFakeWarmSession?
     let logger: ShellFakeLogger
     let effects: ShellFakeEffects
     let store: FileProjectStore
@@ -109,20 +122,22 @@ struct ShellRig {
         cams: [DeviceItem] = [DeviceItem(id: "cam1", name: "Cam", isDefault: true)],
         windows: [WindowItem] = [WindowItem(id: 55, title: "Doc", appName: "Notes", frame: CGRect(x: 100, y: 100, width: 800, height: 600))],
         requestResults: [PermissionKind: PermissionState] = [:],
-        initial: ShellSettings? = nil
+        initial: ShellSettings? = nil,
+        warm useWarm: Bool = false
     ) {
         suite = "shell-tests-\(UUID().uuidString)"
         defaults = UserDefaults(suiteName: suite)!
         library = FileManager.default.temporaryDirectory.appendingPathComponent("shell-tests-\(UUID().uuidString)")
         store = FileProjectStore(libraryURL: library)
         session = ShellFakeSession()
+        warm = useWarm ? ShellFakeWarmSession() : nil
         logger = ShellFakeLogger()
         effects = ShellFakeEffects()
         let settingsStore = ShellSettingsStore(defaults: defaults)
         if let initial { settingsStore.save(initial) }
         model = ShellModel(
             services: ShellServices(
-                session: session, inputLogger: logger, store: store,
+                session: warm ?? session, inputLogger: logger, store: store,
                 sources: StubSourceProvider(
                     listing: SourceListing(displays: [Self.mainDisplay, Self.sideDisplay], windows: windows),
                     mics: mics, cams: cams),
@@ -134,4 +149,30 @@ struct ShellRig {
         try? FileManager.default.removeItem(at: library)
         defaults.removePersistentDomain(forName: suite)
     }
+}
+
+/// A session that can warm up, recording the order of calls so tests can check the countdown sequence.
+final class ShellFakeWarmSession: WarmableRecordingSession, @unchecked Sendable {
+    private let lock = NSLock()
+    private let inner = ShellFakeSession()
+    private var _calls: [String] = []
+    var failPrepare: NSSError?
+    var calls: [String] { lock.withLock { _calls } }
+    var startedOptions: RecordingOptions? { inner.startedOptions }
+    private func note(_ c: String) { lock.withLock { _calls.append(c) } }
+
+    var stateUpdates: AsyncStream<RecordingState> { inner.stateUpdates }
+    var state: RecordingState { get async { await inner.state } }
+    func start(options: RecordingOptions, into bundleURL: URL) async throws {
+        note("start"); try await inner.start(options: options, into: bundleURL)
+    }
+    func prepare(options: RecordingOptions, into bundleURL: URL) async throws {
+        note("prepare")
+        if let failPrepare { throw failPrepare }
+        try await inner.start(options: options, into: bundleURL)
+    }
+    func beginRecording() async throws { note("begin") }
+    func cancelPrepared() async { note("cancelPrepared") }
+    func refreshExclusions() async { note("refresh") }
+    func stop() async throws -> RecordingAssets { note("stop"); return try await inner.stop() }
 }

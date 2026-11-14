@@ -24,6 +24,7 @@ public struct PermissionsView: View {
         }
         .padding(24)
         .frame(width: 480)
+        .excludedFromCapture()
         .task { model.refreshPermissions() }
     }
 }

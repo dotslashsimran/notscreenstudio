@@ -79,10 +79,13 @@ public struct MenuBarContent: View {
             micSection
             cameraSection
             Divider()
+            countdownSection
+            Divider()
             footer
         }
         .padding(12)
         .frame(width: 300)
+        .excludedFromCapture()
         .task { await model.refreshSources() }
     }
 
@@ -90,10 +93,10 @@ public struct MenuBarContent: View {
 
     private var recordButton: some View {
         Button {
-            Task { await model.toggleRecording() }
+            if model.isCountingDown { model.cancelCountdown() } else { Task { await model.toggleRecording() } }
         } label: {
             HStack {
-                Image(systemName: model.isRecording ? "stop.fill" : "record.circle.fill")
+                Image(systemName: model.isRecording ? "stop.fill" : model.isCountingDown ? "xmark" : "record.circle.fill")
                 Text(recordTitle).fontWeight(.semibold)
                 Spacer()
                 Text(model.isRecording ? StopShortcut.display : model.sourceTitle)
@@ -104,13 +107,13 @@ public struct MenuBarContent: View {
         }
         .buttonStyle(.borderedProminent)
         .tint(.red)
-        .disabled(!model.canStart && !model.isRecording)
+        .disabled(!model.canStart && !model.isRecording && !model.isCountingDown)
     }
 
     private var recordTitle: String {
         switch model.phase {
         case .recording: return "Stop Recording"
-        case .preparing: return "Starting…"
+        case .preparing: return model.isCountingDown ? "Cancel Countdown" : "Starting…"
         case .saving: return "Saving…"
         default: return "Record"
         }
@@ -197,8 +200,21 @@ public struct MenuBarContent: View {
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
+                if model.settings.cameraShape != .circle {
+                    HStack {
+                        Text("Corners").font(.caption).foregroundStyle(.secondary)
+                        Slider(value: Binding(get: { model.settings.bubbleRoundness }, set: { model.selectRoundness($0) }), in: 0...1)
+                    }
+                }
             }
         }
+    }
+
+    private var countdownSection: some View {
+        Picker("Countdown", selection: Binding(get: { model.settings.countdownSeconds }, set: { model.setCountdown($0) })) {
+            ForEach(ShellSettings.countdownChoices, id: \.self) { Text($0 == 0 ? "Off" : "\($0) s").tag($0) }
+        }
+        .pickerStyle(.segmented)
     }
 
     // MARK: Footer

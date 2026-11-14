@@ -4,6 +4,20 @@ import Foundation
 import NSSCore
 @preconcurrency import ScreenCaptureKit
 
+/// A session that can warm up (open the stream and devices) and start recording later, so a countdown can
+/// run in between. Frames are held back until `beginRecording()`, which makes that instant t = 0.
+public protocol WarmableRecordingSession: RecordingSession {
+    /// Gets everything ready without recording. Throws if the sources cannot be captured.
+    func prepare(options: RecordingOptions, into bundleURL: URL) async throws
+    /// Starts recording now. Returns once the first frame is written (the origin is set).
+    func beginRecording() async throws
+    /// Abandons a prepared session and removes its files.
+    func cancelPrepared() async
+    /// Re-reads the shareable content and updates the running filter, so windows that appeared after the
+    /// stream started (HUD, camera bubble) stay excluded. Safe to call at any time.
+    func refreshExclusions() async
+}
+
 /// Real `RecordingSession`: screen (SCStream) + optional mic and camera (AVCaptureSession), written
 /// into a bundle directory. All files share one time origin: the host-clock PTS of the first screen frame.
 public actor ScreenCaptureRecordingSession: RecordingSession {
@@ -21,8 +35,17 @@ public actor ScreenCaptureRecordingSession: RecordingSession {
     private var bundleURL: URL?
     /// Files created by the current attempt only. Cleanup never touches anything else.
     private var createdFiles: [URL] = []
+    /// True between `prepare` and `beginRecording`.
+    private var awaitingBegin = false
+    private var lastPlan: FilterPlan?
+    private var lastSource: CaptureSource?
+    private let ownWindowIDs: @Sendable () async -> [UInt32]
 
-    public init() {}
+    /// `ownWindowIDs` reports this app's window numbers (`NSWindow.windowNumber`). They are a fallback for
+    /// excluding windows when the owning process cannot be matched.
+    public init(ownWindowIDs: @escaping @Sendable () async -> [UInt32] = { [] }) {
+        self.ownWindowIDs = ownWindowIDs
+    }
 
     public nonisolated var stateUpdates: AsyncStream<RecordingState> { hub.stream() }
     /// Runtime problems (window closed, device unplugged, disk full).
@@ -30,6 +53,16 @@ public actor ScreenCaptureRecordingSession: RecordingSession {
     public var state: RecordingState { hub.current }
 
     public func start(options: RecordingOptions, into bundleURL: URL) async throws {
+        try await prepare(options: options, into: bundleURL, armed: true)
+        hub.set(.recording(startedAt: Date()))
+    }
+
+    public func prepare(options: RecordingOptions, into bundleURL: URL) async throws {
+        try await prepare(options: options, into: bundleURL, armed: false)
+        awaitingBegin = true
+    }
+
+    private func prepare(options: RecordingOptions, into bundleURL: URL, armed: Bool) async throws {
         switch hub.current {
         case .preparing, .recording, .stopping:
             throw NSSError.unsupported("A recording is already in progress.")
@@ -39,14 +72,66 @@ public actor ScreenCaptureRecordingSession: RecordingSession {
         await discardRecorders() // recorders left over from a failed run
         files = nil; plan = nil; self.bundleURL = nil; createdFiles = []
         fatalError = nil
+        awaitingBegin = false
         do {
-            try await begin(options: options, bundleURL: bundleURL)
+            try await begin(options: options, bundleURL: bundleURL, armed: armed)
+        } catch {
+            await teardownAfterFailedStart()
+            let mapped = CaptureErrorMapper.map(error)
+            hub.set(.failed(message: Self.message(mapped)))
+            throw mapped
+        }
+    }
+
+    public func beginRecording() async throws {
+        guard awaitingBegin, let recorder = screen else {
+            throw NSSError.unsupported("No prepared recording to start.")
+        }
+        awaitingBegin = false
+        recorder.arm()
+        do {
+            try await waitForFirstFrame(recorder)
             hub.set(.recording(startedAt: Date()))
         } catch {
             await teardownAfterFailedStart()
             let mapped = CaptureErrorMapper.map(error)
             hub.set(.failed(message: Self.message(mapped)))
             throw mapped
+        }
+    }
+
+    public func cancelPrepared() async {
+        guard awaitingBegin else { return }
+        awaitingBegin = false
+        await teardownAfterFailedStart()
+        hub.set(.idle)
+    }
+
+    public func refreshExclusions() async {
+        guard let recorder = screen, let source = lastSource, let current = lastPlan, !current.isWindow else { return }
+        do {
+            let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
+            let snapshot = CaptureFilter.snapshot(of: content)
+            let updated = try CaptureFilter.plan(
+                source: source, snapshot: snapshot, ownPID: ProcessInfo.processInfo.processIdentifier,
+                ownBundleID: Bundle.main.bundleIdentifier, ownWindowIDs: await ownWindowIDs())
+            let filter = try CaptureFilter.makeFilter(updated, content: content)
+            try await recorder.updateFilter(filter)
+            lastPlan = updated
+            CaptureDebug.log(CaptureDebug.describe(
+                updated, snapshot: snapshot, ownPID: ProcessInfo.processInfo.processIdentifier, filterBuiltFrom: "updateContentFilter"))
+        } catch {
+            CaptureDebug.log("updateContentFilter failed: \(error)")
+        }
+    }
+
+    private func waitForFirstFrame(_ recorder: ScreenRecorder) async throws {
+        // Give the first frame a moment so the caller returns with the origin already set.
+        for _ in 0..<300 where !recorder.hasFirstFrame {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        if !recorder.hasFirstFrame {
+            throw NSSError.io("No screen frames arrived. Check that the selected source is visible and try again.")
         }
     }
 
@@ -60,7 +145,7 @@ public actor ScreenCaptureRecordingSession: RecordingSession {
         if let c { _ = try? await c.stop(endHost: now) }
     }
 
-    private func begin(options: RecordingOptions, bundleURL: URL) async throws {
+    private func begin(options: RecordingOptions, bundleURL: URL, armed: Bool) async throws {
         try await CapturePermissions.ensure(for: options)
         do {
             try FileManager.default.createDirectory(at: bundleURL, withIntermediateDirectories: true)
@@ -80,11 +165,20 @@ public actor ScreenCaptureRecordingSession: RecordingSession {
         } catch {
             throw CaptureErrorMapper.map(error)
         }
-        let (filter, area, isWindow) = try Self.makeFilter(options.source, content: content)
+        // Built here, after the shell has shown its countdown, bubble and HUD windows, from content fetched now.
+        let snapshot = CaptureFilter.snapshot(of: content)
+        let ownPID = ProcessInfo.processInfo.processIdentifier
+        let filterPlan = try CaptureFilter.plan(
+            source: options.source, snapshot: snapshot, ownPID: ownPID, ownBundleID: Bundle.main.bundleIdentifier,
+            ownWindowIDs: await ownWindowIDs())
+        let filter = try CaptureFilter.makeFilter(filterPlan, content: content)
+        lastPlan = filterPlan
+        lastSource = options.source
+        CaptureDebug.log(CaptureDebug.describe(filterPlan, snapshot: snapshot, ownPID: ownPID, filterBuiltFrom: "initial"))
         let info = SCShareableContent.info(for: filter)
         let plan = try ScreenStreamPlan.make(
             contentPoints: info.contentRect.size, scale: Double(info.pointPixelScale),
-            area: area, isWindow: isWindow, systemAudio: options.captureSystemAudio)
+            area: filterPlan.area, isWindow: filterPlan.isWindow, systemAudio: options.captureSystemAudio)
         self.plan = plan
 
         let box = WeakSession(self)
@@ -111,17 +205,11 @@ public actor ScreenCaptureRecordingSession: RecordingSession {
         createdFiles.append(files.url(files.screen, in: bundleURL))
         let recorder = try ScreenRecorder(
             filter: filter, plan: plan, url: files.url(files.screen, in: bundleURL),
-            origin: origin, onFailure: report(.screen, true))
+            origin: origin, armed: armed, onFailure: report(.screen, true))
         screen = recorder
         try await recorder.start()
 
-        // Give the first frame a moment so `start` returns with the origin already set.
-        for _ in 0..<300 where !recorder.hasFirstFrame {
-            try? await Task.sleep(for: .milliseconds(10))
-        }
-        if !recorder.hasFirstFrame {
-            throw NSSError.io("No screen frames arrived. Check that the selected source is visible and try again.")
-        }
+        if armed { try await waitForFirstFrame(recorder) }
     }
 
     private func handle(_ event: CaptureEvent) {
@@ -135,7 +223,8 @@ public actor ScreenCaptureRecordingSession: RecordingSession {
 
     public func stop() async throws -> RecordingAssets {
         // Serialize against an in-flight start().
-        while case .preparing = hub.current { try? await Task.sleep(for: .milliseconds(10)) }
+        while case .preparing = hub.current, !awaitingBegin { try? await Task.sleep(for: .milliseconds(10)) }
+        if awaitingBegin { throw NSSError.unsupported("The recording has not started yet.") }
         // Take ownership synchronously (no await before this point) so a second stop() finds nothing.
         guard let screen, let plan, let files else {
             throw NSSError.unsupported("No recording is in progress.")
@@ -186,32 +275,6 @@ public actor ScreenCaptureRecordingSession: RecordingSession {
         switch e {
         case .notImplemented(let m), .unsupported(let m), .permissionDenied(let m),
              .invalidProject(let m), .renderFailed(let m), .io(let m): return m
-        }
-    }
-
-    /// Builds the content filter. Excludes this app's own windows (camera bubble, HUD) from display and area captures.
-    static func makeFilter(_ source: CaptureSource, content: SCShareableContent) throws -> (SCContentFilter, CGRect?, Bool) {
-        let ownPID = ProcessInfo.processInfo.processIdentifier
-        let ownBundle = Bundle.main.bundleIdentifier
-        let own = content.applications.filter {
-            CaptureMath.isOwnApp(pid: $0.processID, bundleID: $0.bundleIdentifier, ownPID: ownPID, ownBundleID: ownBundle)
-        }
-        switch source {
-        case .display(let id):
-            guard let d = content.displays.first(where: { $0.displayID == id }) else {
-                throw NSSError.unsupported("The selected display is no longer available.")
-            }
-            return (SCContentFilter(display: d, excludingApplications: own, exceptingWindows: []), nil, false)
-        case .area(let id, let rect):
-            guard let d = content.displays.first(where: { $0.displayID == id }) else {
-                throw NSSError.unsupported("The selected display is no longer available.")
-            }
-            return (SCContentFilter(display: d, excludingApplications: own, exceptingWindows: []), rect, false)
-        case .window(let id):
-            guard let w = content.windows.first(where: { $0.windowID == id }) else {
-                throw NSSError.io("The selected window was closed.")
-            }
-            return (SCContentFilter(desktopIndependentWindow: w), nil, true)
         }
     }
 }
