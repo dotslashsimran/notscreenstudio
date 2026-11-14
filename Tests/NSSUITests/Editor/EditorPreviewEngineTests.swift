@@ -73,6 +73,34 @@ func writeTestMovie(to url: URL, seconds: Double = 1, fps: Int32 = 30, size: Int
         engine.teardown()
     }
 
+    @Test func playbackStopsWhenFileEndsBeforeRecordedDuration() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("nss-editor-\(UUID().uuidString).nssproj")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        do { try await writeTestMovie(to: dir.appendingPathComponent("screen.mov")) } catch { return }
+
+        // Recorded duration is longer than the 1 s file.
+        let assets = RecordingAssets(sourcePixelSize: PixelSize(width: 64, height: 64), frameRate: 30, duration: 1.2)
+        let deps = EditorDependencies(store: RecordingStore(), motionFactory: { _, _, _, _ in IdentityMotion() }, renderer: PassthroughRenderer(), exporter: ScriptedExporter())
+        let model = EditorModel(project: Project(name: "t", assets: assets), reference: ProjectReference(url: dir), track: .empty, dependencies: deps)
+        let engine = PreviewEngine(model: model)
+        for _ in 0..<50 { engine.tick(); try await Task.sleep(for: .milliseconds(10)) }
+
+        engine.play()
+        #expect(model.isPlaying)
+        for _ in 0..<500 where model.isPlaying {
+            engine.tick()
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(!model.isPlaying)
+
+        // Pressing play again restarts from the trim start.
+        engine.play()
+        #expect(model.isPlaying)
+        #expect(model.playhead < 0.5)
+        engine.teardown()
+    }
+
     @Test func previewSizesKeepAspect() {
         for a in AspectRatio.allCases {
             let s = PreviewEngine.previewSize(for: a)

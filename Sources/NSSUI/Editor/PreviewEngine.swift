@@ -45,6 +45,8 @@ public final class PreviewEngine {
     private var motionGeneration = 0
     private var tickCount = 0
     private var syncCheckCount = 0
+    private var itemEnded = false
+    private var endObserver: NSObjectProtocol?
 
     /// Called on the main actor with each finished buffer (the view sets it as layer contents).
     public var present: ((CVPixelBuffer) -> Void)?
@@ -66,8 +68,19 @@ public final class PreviewEngine {
         }
         renderer = model.dependencies.renderer
         motion = MotionBox(IdentityMotion())
+        endObserver = NotificationCenter.default.addObserver(
+            forName: AVPlayerItem.didPlayToEndTimeNotification, object: screen.player.currentItem, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.itemEnded = true }
+        }
         rebuildMotion()
         seek(to: model.trimStart)
+    }
+
+    /// Where playback really ends: the trim end, or earlier if the screen file is shorter than the recorded duration.
+    private var effectiveEnd: MediaTime {
+        let d = screen.player.currentItem?.duration.seconds ?? .nan
+        return d.isFinite && d > 0 ? min(model.trimEnd, d - 0.02) : model.trimEnd
     }
 
     public var frameSource: PlayerFrameSource { PlayerFrameSource(screen: screen, camera: camera) }
@@ -99,7 +112,9 @@ public final class PreviewEngine {
     // MARK: Transport
 
     public func play() {
-        if model.playhead >= model.trimEnd - 0.01 { seek(to: model.trimStart) }
+        itemEnded = false
+        if model.playhead >= effectiveEnd - 0.01 { seek(to: model.trimStart) }
+        itemEnded = false
         let t = CMTime(seconds: model.playhead, preferredTimescale: 600)
         let players = allPlayers
         if screen.player.currentItem?.status == .readyToPlay {
@@ -134,6 +149,8 @@ public final class PreviewEngine {
 
     public func teardown() {
         for p in allPlayers { p.pause() }
+        if let o = endObserver { NotificationCenter.default.removeObserver(o) }
+        endObserver = nil
         present = nil
     }
 
@@ -157,8 +174,8 @@ public final class PreviewEngine {
         if model.isPlaying {
             let raw = screen.player.currentTime().seconds
             t = raw.isFinite ? raw : t
-            if t >= model.trimEnd {
-                t = model.trimEnd
+            if t >= effectiveEnd || itemEnded {
+                t = min(max(t, model.trimStart), model.trimEnd)
                 pause()
                 model.playhead = t
             } else {
