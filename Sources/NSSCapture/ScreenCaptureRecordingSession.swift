@@ -20,7 +20,7 @@ public protocol WarmableRecordingSession: RecordingSession {
 
 /// Real `RecordingSession`: screen (SCStream) + optional mic and camera (AVCaptureSession), written
 /// into a bundle directory. All files share one time origin: the host-clock PTS of the first screen frame.
-public actor ScreenCaptureRecordingSession: RecordingSession {
+public actor ScreenCaptureRecordingSession: WarmableRecordingSession {
     private let hub = StateHub()
     private let events = EventHub()
 

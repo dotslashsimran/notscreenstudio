@@ -141,3 +141,10 @@ import NSSCore
         await s.refreshExclusions()
     }
 }
+
+@Suite struct WarmConformanceTests {
+    /// The shell warms up capture only if the real session is a `WarmableRecordingSession`.
+    @Test func realSessionIsWarmable() {
+        #expect((ScreenCaptureRecordingSession() as any RecordingSession) is any WarmableRecordingSession)
+    }
+}
