@@ -243,7 +243,7 @@ import NSSCore
     }
 
     @Test func bubbleGeometryIsSavedIntoProjectAndSettings() async throws {
-        let rig = ShellRig(initial: ShellSettings(cameraEnabled: true, cameraShape: .squircle))
+        let rig = ShellRig(initial: ShellSettings(cameraEnabled: true, cameraShape: .tall))
         defer { rig.cleanup() }
         await rig.model.startRecording()
         // The initial frame comes from the saved defaults, relative to the 1440x900 main display.
@@ -256,7 +256,7 @@ import NSSCore
         let project = try await rig.store.load(ref)
         let cam = project.style.camera
         #expect(cam.visible)
-        #expect(cam.shape == .squircle)
+        #expect(cam.shape == .tall)
         // Saved in OUTPUT space: the 2880x1800 source sits inside the padded 16:9 output.
         let expected = BubbleGeometry.toOutputSpace(
             center: NormalizedPoint(x: 1144.0 / 1440, y: (900.0 - 244.0) / 900), size: 0.2,
@@ -296,12 +296,12 @@ import NSSCore
         rig.model.selectMicrophone("mic1")
         rig.model.setCameraEnabled(true)
         rig.model.selectCamera("cam1")
-        rig.model.selectShape(.rectangle)
+        rig.model.selectShape(.wide)
         let reloaded = ShellSettingsStore(defaults: rig.defaults).load()
         #expect(reloaded == rig.model.settings)
         #expect(reloaded.source == .display(id: 8))
         #expect(reloaded.micEnabled && reloaded.cameraEnabled)
-        #expect(reloaded.cameraShape == .rectangle)
+        #expect(reloaded.cameraShape == .wide)
     }
 
     @Test func launchRequestsOnboardingOnlyWhenScreenRecordingIsMissing() async {

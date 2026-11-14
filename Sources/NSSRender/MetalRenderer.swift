@@ -194,13 +194,7 @@ public final class MetalRenderer: FrameRenderer, @unchecked Sendable {
         if let camera, bubble.visible, bubble.size > 0 {
             let camSize = PixelSize(width: camera.width, height: camera.height)
             let r = layout.cameraBubbleRect(bubble, cameraSize: camSize)
-            let shape: Double
-            switch bubble.shape {
-            case .circle: shape = 0
-            case .roundedRect: shape = 1
-            case .squircle: shape = 2
-            case .rectangle: shape = 3
-            }
+            let shape: Double = bubble.shape == .circle ? 0 : 1
             let border = bubble.border.map { max(0, $0.width) * H } ?? 0
             set(.bubble, r.midX, r.midY, r.width / 2, r.height / 2)
             set(.bubble2, shape, layout.cameraBubbleCornerRadius(bubble, rect: r), border, 1)

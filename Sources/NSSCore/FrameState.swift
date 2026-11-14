@@ -34,18 +34,26 @@ public struct CursorState: Codable, Sendable, Equatable {
     /// 0...1 cursor opacity (idle fade). Multiply into the cursor's alpha; 1 = fully opaque.
     /// `visible == false` implies nothing is drawn regardless of opacity.
     public var opacity: Double
+    /// Cursor image to draw.
+    public var shape: CursorShape
+    /// Scale of the cursor while the button is down (1 = normal, below 1 = squished).
+    public var pressScale: Double
     public init(
         position: NormalizedPoint = .center,
         velocity: NormalizedPoint = .zero,
         visible: Bool = true,
         ripples: [RippleState] = [],
-        opacity: Double = 1
+        opacity: Double = 1,
+        shape: CursorShape = .arrow,
+        pressScale: Double = 1
     ) {
         self.position = position
         self.velocity = velocity
         self.visible = visible
         self.ripples = ripples
         self.opacity = opacity
+        self.shape = shape
+        self.pressScale = pressScale
     }
 }
 
@@ -59,6 +67,8 @@ extension CursorState {
         visible = try c.decodeIfPresent(Bool.self, forKey: .visible) ?? d.visible
         ripples = try c.decodeIfPresent([RippleState].self, forKey: .ripples) ?? d.ripples
         opacity = try c.decodeIfPresent(Double.self, forKey: .opacity) ?? d.opacity
+        shape = try c.decodeIfPresent(CursorShape.self, forKey: .shape) ?? d.shape
+        pressScale = try c.decodeIfPresent(Double.self, forKey: .pressScale) ?? d.pressScale
     }
 }
 

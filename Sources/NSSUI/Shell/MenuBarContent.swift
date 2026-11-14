@@ -4,33 +4,33 @@ import NSSCore
 
 /// Camera shapes offered in the menu, with the default radius for the rounded one.
 public enum ShapeKind: String, CaseIterable, Identifiable, Sendable {
-    case circle, roundedRect, squircle, rectangle
+    case circle, square, tall, wide
     public var id: String { rawValue }
 
     public var title: String {
         switch self {
         case .circle: return "Circle"
-        case .roundedRect: return "Rounded"
-        case .squircle: return "Squircle"
-        case .rectangle: return "Rectangle"
+        case .square: return "Square"
+        case .tall: return "Tall"
+        case .wide: return "Wide"
         }
     }
 
     public var shape: CameraShape {
         switch self {
         case .circle: return .circle
-        case .roundedRect: return .roundedRect(radius: 0.2)
-        case .squircle: return .squircle
-        case .rectangle: return .rectangle
+        case .square: return .square
+        case .tall: return .tall
+        case .wide: return .wide
         }
     }
 
     public init(_ shape: CameraShape) {
         switch shape {
         case .circle: self = .circle
-        case .roundedRect: self = .roundedRect
-        case .squircle: self = .squircle
-        case .rectangle: self = .rectangle
+        case .square: self = .square
+        case .tall: self = .tall
+        case .wide: self = .wide
         }
     }
 }

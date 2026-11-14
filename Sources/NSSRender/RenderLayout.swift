@@ -115,27 +115,15 @@ public struct RenderLayout: Sendable, Equatable {
 
     // MARK: Camera bubble
 
-    /// Bubble frame in output pixels. Circle and squircle are square; the other shapes follow the
-    /// camera aspect (16:9 when no camera frame is known).
+    /// Bubble frame in output pixels, from the shared `CameraBubbleGeometry`.
     public func cameraBubbleRect(_ bubble: CameraBubble, cameraSize: PixelSize?) -> CGRect {
         let w = Double(outputSize.width), h = Double(outputSize.height)
-        let bw = max(0, bubble.size) * w
-        let bh: Double
-        switch bubble.shape {
-        case .circle, .squircle:
-            bh = bw
-        case .roundedRect, .rectangle:
-            let a = cameraSize.map { $0.width > 0 && $0.height > 0 ? $0.aspect : 16.0 / 9.0 } ?? 16.0 / 9.0
-            bh = bw / a
-        }
-        return CGRect(x: bubble.position.x * w - bw / 2, y: bubble.position.y * h - bh / 2, width: bw, height: bh)
+        let l = CameraBubbleGeometry.layout(bubble, width: max(0, bubble.size) * w)
+        return CGRect(x: bubble.position.x * w - l.width / 2, y: bubble.position.y * h - l.height / 2, width: l.width, height: l.height)
     }
 
-    /// Corner radius of the bubble in output pixels (0 for circle/squircle/rectangle, which use their own SDFs).
+    /// Corner radius of the bubble in output pixels.
     public func cameraBubbleCornerRadius(_ bubble: CameraBubble, rect: CGRect) -> Double {
-        if case .roundedRect(let r) = bubble.shape {
-            return max(0, min(0.5, r)) * min(rect.width, rect.height)
-        }
-        return 0
+        CameraBubbleGeometry.layout(bubble, width: rect.width).cornerRadius
     }
 }

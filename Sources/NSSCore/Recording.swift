@@ -18,17 +18,30 @@ public struct RecordingOptions: Codable, Sendable, Equatable {
     /// AVCaptureDevice uniqueID of the camera, nil = no camera.
     public var cameraDeviceID: String?
     public var captureSystemAudio: Bool
+    /// Seconds counted down before recording starts; 0 = off.
+    public var countdownSeconds: Int
 
     public init(
         source: CaptureSource,
         micDeviceID: String? = nil,
         cameraDeviceID: String? = nil,
-        captureSystemAudio: Bool = false
+        captureSystemAudio: Bool = false,
+        countdownSeconds: Int = 3
     ) {
         self.source = source
         self.micDeviceID = micDeviceID
         self.cameraDeviceID = cameraDeviceID
         self.captureSystemAudio = captureSystemAudio
+        self.countdownSeconds = countdownSeconds
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        source = try c.decode(CaptureSource.self, forKey: .source)
+        micDeviceID = try c.decodeIfPresent(String.self, forKey: .micDeviceID)
+        cameraDeviceID = try c.decodeIfPresent(String.self, forKey: .cameraDeviceID)
+        captureSystemAudio = try c.decodeIfPresent(Bool.self, forKey: .captureSystemAudio) ?? false
+        countdownSeconds = try c.decodeIfPresent(Int.self, forKey: .countdownSeconds) ?? 3
     }
 }
 
@@ -49,6 +62,8 @@ public struct RecordingAssets: Codable, Sendable, Equatable {
     /// of the FIRST screen frame written to `screenFile`. `RecordingSession.stop()` fills it.
     /// Cursor/click timestamps are rebased to this origin by `InputLogger.stop(recordingStartHostTime:)`.
     public var startHostTime: Double
+    /// Project thumbnail (relative to the bundle root); nil until generated.
+    public var thumbnailFile: String?
 
     public static let defaultScreenFile = "screen.mov"
     public static let defaultCameraFile = "camera.mov"
@@ -63,7 +78,8 @@ public struct RecordingAssets: Codable, Sendable, Equatable {
         sourcePixelSize: PixelSize,
         frameRate: Double,
         duration: MediaTime,
-        startHostTime: Double = 0
+        startHostTime: Double = 0,
+        thumbnailFile: String? = nil
     ) {
         self.screenFile = screenFile
         self.cameraFile = cameraFile
@@ -73,6 +89,7 @@ public struct RecordingAssets: Codable, Sendable, Equatable {
         self.frameRate = frameRate
         self.duration = duration
         self.startHostTime = startHostTime
+        self.thumbnailFile = thumbnailFile
     }
 }
 
@@ -97,5 +114,6 @@ extension RecordingAssets {
         frameRate = try c.decode(Double.self, forKey: .frameRate)
         duration = try c.decode(MediaTime.self, forKey: .duration)
         startHostTime = try c.decodeIfPresent(Double.self, forKey: .startHostTime) ?? 0
+        thumbnailFile = try c.decodeIfPresent(String.self, forKey: .thumbnailFile)
     }
 }

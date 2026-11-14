@@ -60,7 +60,7 @@ import NSSCore
         let s = ShellSettings(
             source: .area(displayID: 3, rect: CGRect(x: 10, y: 20, width: 300, height: 200)),
             micEnabled: true, micDeviceID: "m", cameraEnabled: true, cameraDeviceID: "c",
-            cameraShape: .roundedRect(radius: 0.25), bubbleSize: 0.3, bubbleCenter: NormalizedPoint(x: 0.1, y: 0.2))
+            cameraShape: .tall, bubbleSize: 0.3, bubbleCenter: NormalizedPoint(x: 0.1, y: 0.2))
         store.save(s)
         #expect(ShellSettingsStore(defaults: defaults).load() == s)
     }
@@ -124,7 +124,7 @@ import NSSCore
     }
 
     @Test func roundTrips() throws {
-        for shape in [CameraShape.circle, .squircle, .rectangle, .roundedRect(radius: 0.2)] {
+        for shape in CameraShape.allCases {
             let frame = BubbleGeometry.panelFrame(center: NormalizedPoint(x: 0.7, y: 0.3), size: 0.2, shape: shape, in: source)
             let r = try #require(BubbleGeometry.normalize(panelFrame: frame, in: source))
             #expect(abs(r.center.x - 0.7) < 1e-9)
@@ -145,18 +145,19 @@ import NSSCore
 
     @Test func aspectFollowsShape() {
         #expect(BubbleGeometry.aspect(for: .circle) == 1)
-        #expect(BubbleGeometry.aspect(for: .squircle) == 1)
-        #expect(abs(BubbleGeometry.aspect(for: .rectangle) - 16.0 / 9.0) < 1e-9)
-        let f = BubbleGeometry.panelFrame(center: .center, size: 0.2, shape: .rectangle, in: source)
+        #expect(BubbleGeometry.aspect(for: .square) == 1)
+        #expect(abs(BubbleGeometry.aspect(for: .wide) - 16.0 / 9.0) < 1e-9)
+        #expect(abs(BubbleGeometry.aspect(for: .tall) - 0.75) < 1e-9)
+        let f = BubbleGeometry.panelFrame(center: .center, size: 0.2, shape: .wide, in: source)
         #expect(abs(f.width / f.height - 16.0 / 9.0) < 1e-9)
     }
 
     @Test func cornerRadiusPerShape() {
         let size = CGSize(width: 200, height: 200)
         #expect(BubbleGeometry.cornerRadius(for: .circle, size: size) == 100)
-        #expect(BubbleGeometry.cornerRadius(for: .rectangle, size: size) == 0)
-        #expect(BubbleGeometry.cornerRadius(for: .roundedRect(radius: 0.25), size: size) == 50)
-        #expect(BubbleGeometry.cornerRadius(for: .roundedRect(radius: 9), size: size) == 100)
+        #expect(BubbleGeometry.cornerRadius(for: .square, roundness: 0, size: size) == 0)
+        #expect(BubbleGeometry.cornerRadius(for: .square, roundness: 0.5, size: size) == 50)
+        #expect(BubbleGeometry.cornerRadius(for: .square, roundness: 9, size: size) == 100)
     }
 
     @Test func flipIsItsOwnInverse() {

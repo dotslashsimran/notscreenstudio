@@ -92,3 +92,57 @@ public protocol InputLogger: Sendable {
     /// same clock as `CACurrentMediaTime()`. Events before the origin are dropped or clamped to 0.
     func stop(recordingStartHostTime: Double) async -> CursorTrack
 }
+
+// MARK: - Project library (home screen)
+
+/// One row on the home screen.
+public struct ProjectSummary: Codable, Sendable, Equatable, Identifiable {
+    public var id: UUID
+    public var name: String
+    public var createdAt: Date
+    public var duration: MediaTime
+    public var bundle: ProjectReference
+    public var thumbnailURL: URL?
+    public init(
+        id: UUID = UUID(), name: String, createdAt: Date = Date(), duration: MediaTime,
+        bundle: ProjectReference, thumbnailURL: URL? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.createdAt = createdAt
+        self.duration = duration
+        self.bundle = bundle
+        self.thumbnailURL = thumbnailURL
+    }
+}
+
+
+public protocol ProjectLibrary: Sendable {
+    /// All projects, newest first.
+    func summaries() async throws -> [ProjectSummary]
+    /// Thumbnail for a project, generating it if missing. nil if it cannot be made.
+    func thumbnailURL(for summary: ProjectSummary) async -> URL?
+    /// Moves the project bundle to the Trash.
+    func delete(_ summary: ProjectSummary) async throws
+    func rename(_ summary: ProjectSummary, to name: String) async throws
+}
+
+/// In-memory `ProjectLibrary` for tests and previews.
+public actor InMemoryProjectLibrary: ProjectLibrary {
+    private var items: [ProjectSummary]
+    public init(_ items: [ProjectSummary] = []) { self.items = items }
+
+    public func summaries() async throws -> [ProjectSummary] {
+        items.sorted { $0.createdAt > $1.createdAt }
+    }
+    public func thumbnailURL(for summary: ProjectSummary) async -> URL? {
+        items.first { $0.id == summary.id }?.thumbnailURL
+    }
+    public func delete(_ summary: ProjectSummary) async throws {
+        items.removeAll { $0.id == summary.id }
+    }
+    public func rename(_ summary: ProjectSummary, to name: String) async throws {
+        guard let i = items.firstIndex(where: { $0.id == summary.id }) else { return }
+        items[i].name = name
+    }
+}
