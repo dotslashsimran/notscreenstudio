@@ -56,3 +56,41 @@ Recording writes a `.nssproj` bundle in `~/Movies/notscreenstudio`. The bundle h
 - Time origin: t = 0 is the first screen frame. `RecordingAssets.startHostTime` holds its host-clock time (the `CACurrentMediaTime()` clock). `InputLogger.stop(recordingStartHostTime:)` returns a track already rebased to it.
 - `FrameSource` picks the frame nearest at-or-before `t` for both screen and camera. Camera returns nil when there is no camera track. `SolidColorFrameSource` in NSSRender is the stub.
 - Codable policy: every persisted type decodes with `decodeIfPresent` and a default for every field that is not essential, so an older `project.json` without a newer field still loads. New fields must follow this rule.
+
+## Round 2
+
+Round 1 is merged. The user tested main by hand and found eight parity gaps with Screen Studio. Round 2 closes them.
+
+### The eight gaps
+
+1. No countdown before recording starts.
+2. The recorder's own windows (HUD, camera bubble overlay) can show up in the capture.
+3. The camera bubble only has old shapes. It needs four shapes (circle, square, tall, wide) with a roundness control, drawn the same in the overlay, the preview and the export.
+4. The cursor is always an arrow. Real cursor shapes (I-beam, pointing hand, resize and so on) are not logged or drawn.
+5. The cursor does not squish while the button is held down.
+6. The camera bubble does not shrink when the view zooms in.
+7. There is no home screen. The user needs a list of past projects with thumbnails, plus rename and delete.
+8. The playhead jumps instead of easing, and the inspector lacks controls for the new bubble options.
+
+### The three checks
+
+- Auto-zoom never shows gaps at the edges of the source.
+- The preview holds 60 fps.
+- The export matches the preview exactly, with audio.
+
+### Shared contracts added in NSSCore (this PR)
+
+- `CursorShape`, `CursorShapeChange`, `CursorTrack.shapes` and `CursorTrack.shape(at:)`. `CursorState.shape` and `CursorState.pressScale`.
+- `CameraShape` is now circle, square, tall, wide. `CameraBubble.roundness` and `CameraBubble.zoomedScale`. `CameraBubbleGeometry` holds the aspect ratios (tall 3:4, wide 16:9), the corner radius rule and `sizeMultiplier(cameraScale:)` (smoothstep from 1 at camera scale 1 to `zoomedScale` at scale 2 or more). Old shapes migrate when decoded: circle stays circle, roundedRect becomes square with matching roundness, squircle becomes square at 0.6, rectangle becomes wide at 0.
+- `RecordingOptions.countdownSeconds` (default 3, 0 is off).
+- `ProjectSummary`, the `ProjectLibrary` protocol, `InMemoryProjectLibrary` and `RecordingAssets.thumbnailFile`.
+
+### Owners
+
+| Worker | Owns | Covers |
+| --- | --- | --- |
+| Recording UX | NSSUI/Shell, NotScreenStudio, capture exclusion | Countdown, exclude own windows from capture, bubble overlay shapes |
+| Cursor (Opus) | NSSInput, NSSMotion | Cursor shape logging, press squish, auto-zoom edge guarantee |
+| Renderer (Opus) | NSSRender | Draw cursor shapes and squish, bubble shrink and the new bubble shapes |
+| Editor + Home | NSSUI/Editor, NSSProject library | Home screen with thumbnails, playhead easing, inspector controls |
+| Verification (last) | Tests, MANUAL_TEST.md | Edge gaps, 60 fps, export equals preview with audio |

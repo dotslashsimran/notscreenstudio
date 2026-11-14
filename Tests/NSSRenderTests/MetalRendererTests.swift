@@ -176,9 +176,8 @@ struct MetalRendererTests {
         var shape: CameraShape {
             switch self {
             case .circle: .circle
-            case .squircle: .squircle
-            case .roundedRect: .roundedRect(radius: 0.25)
-            case .rectangle: .rectangle
+            case .squircle, .roundedRect: .square
+            case .rectangle: .wide
             }
         }
         /// Expected camera coverage at (0.8, 0.8) and (0.97, 0.97) of the bubble half-size.
@@ -198,7 +197,7 @@ struct MetalRendererTests {
         let cam = try TB.filled(640, 480, TB.blue)
         let out = try PixelBuffers.make(width: W, height: H)
         var style = TB.plainStyle(padding: 0)
-        style.camera = CameraBubble(visible: true, shape: shapeCase.shape, position: .center, size: 0.3, border: nil, mirror: false)
+        style.camera = CameraBubble(visible: true, shape: shapeCase.shape, position: .center, size: 0.3, border: nil, mirror: false, roundness: shapeCase == .rectangle ? 0 : (shapeCase == .squircle ? 0.6 : 0.5))
         try MetalRenderer().render(screen: screen, camera: cam, state: TB.hiddenCursor(), style: style, into: out)
         let l = RenderLayout(outputSize: PixelSize(width: W, height: H), sourceSize: PixelSize(width: 1920, height: 1080), style: style, camera: .identity)
         let r = l.cameraBubbleRect(style.camera, cameraSize: PixelSize(width: 640, height: 480))

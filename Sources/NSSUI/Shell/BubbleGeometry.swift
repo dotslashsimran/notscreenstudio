@@ -13,10 +13,7 @@ public enum BubbleGeometry {
 
     /// Width / height of the bubble for a shape.
     public static func aspect(for shape: CameraShape, cameraAspect: Double = defaultCameraAspect) -> Double {
-        switch shape {
-        case .circle, .squircle: return 1
-        case .roundedRect, .rectangle: return cameraAspect > 0 ? cameraAspect : defaultCameraAspect
-        }
+        CameraBubbleGeometry.aspect(for: shape)
     }
 
     /// Converts a rect between the two global coordinate systems. The operation is its own inverse.
@@ -69,14 +66,8 @@ public enum BubbleGeometry {
     }
 
     /// Corner radius in points for a shape drawn in a bubble of `size`.
-    public static func cornerRadius(for shape: CameraShape, size: CGSize) -> CGFloat {
-        let shorter = min(size.width, size.height)
-        switch shape {
-        case .circle: return shorter / 2
-        case .roundedRect(let radius): return CGFloat(min(max(radius, 0), 0.5)) * shorter
-        case .squircle: return shorter * 0.3
-        case .rectangle: return 0
-        }
+    public static func cornerRadius(for shape: CameraShape, roundness: Double = 0.3, size: CGSize) -> CGFloat {
+        CGFloat(CameraBubbleGeometry.layout(shape: shape, roundness: roundness, width: Double(size.width)).cornerRadius)
     }
 
     /// Clamps a requested bubble width to a sensible range for the source width.

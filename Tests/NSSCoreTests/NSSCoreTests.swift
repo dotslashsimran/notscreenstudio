@@ -7,7 +7,7 @@ import Testing
         let assets = RecordingAssets(cameraFile: "camera.mov", sourcePixelSize: PixelSize(width: 2560, height: 1440), frameRate: 60, duration: 12.5)
         var project = Project(name: "Demo", assets: assets)
         project.timeline.zoomBlocks = [ZoomBlock(start: 1, end: 3, scale: 2, focus: .manual(NormalizedPoint(x: 0.3, y: 0.7)))]
-        project.style.camera.shape = .roundedRect(radius: 0.2)
+        project.style.camera.shape = .tall
         let data = try JSONEncoder().encode(project)
         let back = try JSONDecoder().decode(Project.self, from: data)
         #expect(back == project)

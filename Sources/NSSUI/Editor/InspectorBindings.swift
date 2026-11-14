@@ -39,25 +39,25 @@ public enum InspectorBindings {
     }
 
     public enum ShapeKind: String, CaseIterable, Identifiable, Sendable {
-        case circle = "Circle", roundedRect = "Rounded", squircle = "Squircle", rectangle = "Square"
+        case circle = "Circle", square = "Square", tall = "Tall", wide = "Wide"
         public var id: String { rawValue }
     }
 
     public static func kind(of s: CameraShape) -> ShapeKind {
         switch s {
         case .circle: .circle
-        case .roundedRect: .roundedRect
-        case .squircle: .squircle
-        case .rectangle: .rectangle
+        case .square: .square
+        case .tall: .tall
+        case .wide: .wide
         }
     }
 
     public static func shape(_ k: ShapeKind) -> CameraShape {
         switch k {
         case .circle: .circle
-        case .roundedRect: .roundedRect(radius: 0.2)
-        case .squircle: .squircle
-        case .rectangle: .rectangle
+        case .square: .square
+        case .tall: .tall
+        case .wide: .wide
         }
     }
 

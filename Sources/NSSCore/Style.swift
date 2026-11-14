@@ -76,12 +76,94 @@ public struct CursorStyle: Codable, Sendable, Equatable {
     }
 }
 
-public enum CameraShape: Codable, Sendable, Equatable {
-    case circle
-    /// `radius` normalized to the bubble's shorter side (0...0.5).
-    case roundedRect(radius: Double)
-    case squircle
-    case rectangle
+/// Bubble silhouette. Aspect ratios live in `CameraBubbleGeometry` (one place).
+public enum CameraShape: String, Codable, Sendable, Equatable, CaseIterable {
+    case circle, square, tall, wide
+
+    public init(from decoder: Decoder) throws {
+        self = try LegacyCameraShape(from: decoder).shape
+    }
+}
+
+/// Decodes the new string form and the Round 1 forms (`circle`, `roundedRect(radius)`, `squircle`, `rectangle`).
+struct LegacyCameraShape: Decodable {
+    var shape: CameraShape
+    /// Roundness implied by a legacy shape; nil for new-format values.
+    var roundness: Double?
+
+    private enum Keys: String, CodingKey { case circle, roundedRect, squircle, rectangle }
+    private enum RectKeys: String, CodingKey { case radius }
+
+    init(from decoder: Decoder) throws {
+        if let raw = try? decoder.singleValueContainer().decode(String.self) {
+            switch raw {
+            case "circle": shape = .circle
+            case "square": shape = .square
+            case "tall": shape = .tall
+            case "wide": shape = .wide
+            case "squircle": shape = .square; roundness = 0.6
+            case "rectangle": shape = .wide; roundness = 0
+            case "roundedRect": shape = .square; roundness = 0.4
+            default: shape = .circle
+            }
+            return
+        }
+        let c = try decoder.container(keyedBy: Keys.self)
+        if c.contains(.roundedRect) {
+            let n = try c.nestedContainer(keyedBy: RectKeys.self, forKey: .roundedRect)
+            let r = try n.decodeIfPresent(Double.self, forKey: .radius) ?? 0.2
+            shape = .square
+            roundness = min(max(r / 0.5, 0), 1)
+        } else if c.contains(.squircle) {
+            shape = .square; roundness = 0.6
+        } else if c.contains(.rectangle) {
+            shape = .wide; roundness = 0
+        } else {
+            shape = .circle
+        }
+    }
+}
+
+/// Single source of truth for bubble dimensions, shared by the recording overlay, renderer and inspector.
+public enum CameraBubbleGeometry {
+    /// Width / height of each shape.
+    public static func aspect(for shape: CameraShape) -> Double {
+        switch shape {
+        case .circle, .square: 1
+        case .tall: 3.0 / 4.0
+        case .wide: 16.0 / 9.0
+        }
+    }
+
+    /// Camera scale at (and above) which the bubble reaches `zoomedScale`.
+    public static let referenceZoom = 2.0
+
+    public struct Layout: Sendable, Equatable {
+        public var width: Double
+        public var height: Double
+        public var cornerRadius: Double
+    }
+
+    /// Dimensions and corner radius for a bubble of `width` (in whatever unit the caller uses).
+    /// Radius = roundness * shorter side / 2; circle is always fully round.
+    public static func layout(shape: CameraShape, roundness: Double, width: Double) -> Layout {
+        let w = max(0, width)
+        let h = w / aspect(for: shape)
+        let shorter = min(w, h)
+        let r = shape == .circle ? 1 : min(max(roundness, 0), 1)
+        return Layout(width: w, height: h, cornerRadius: r * shorter / 2)
+    }
+
+    public static func layout(_ bubble: CameraBubble, width: Double) -> Layout {
+        layout(shape: bubble.shape, roundness: bubble.roundness, width: width)
+    }
+
+    /// Size multiplier for the bubble: 1 at camera scale <= 1, `zoomedScale` at `referenceZoom` or more (smoothstep).
+    public static func sizeMultiplier(cameraScale: Double, zoomedScale: Double) -> Double {
+        let t = min(max((cameraScale - 1) / (referenceZoom - 1), 0), 1)
+        let s = t * t * (3 - 2 * t)
+        return 1 + (zoomedScale - 1) * s
+    }
 }
 
 public struct CameraBorder: Codable, Sendable, Equatable {
@@ -99,17 +181,23 @@ public struct CameraBubble: Codable, Sendable, Equatable {
     public var shape: CameraShape
     /// Center of the bubble in normalized OUTPUT space (0...1, origin top-left).
     public var position: NormalizedPoint
-    /// Bubble width as a fraction of output width; height follows the camera aspect (or 1:1 for circle/squircle).
+    /// Bubble width as a fraction of output width; height follows `CameraBubbleGeometry.aspect(for: shape)`.
     public var size: Double
     public var border: CameraBorder?
     public var mirror: Bool
+    /// 0 = sharp corners, 1 = fully round (circle for square, pill for tall/wide). Ignored for `.circle`.
+    public var roundness: Double
+    /// Size multiplier when the view is fully zoomed in (1 = no shrink).
+    public var zoomedScale: Double
     public init(
         visible: Bool = true,
         shape: CameraShape = .circle,
         position: NormalizedPoint = NormalizedPoint(x: 0.88, y: 0.82),
         size: Double = 0.18,
         border: CameraBorder? = CameraBorder(),
-        mirror: Bool = true
+        mirror: Bool = true,
+        roundness: Double = 0.3,
+        zoomedScale: Double = 0.6
     ) {
         self.visible = visible
         self.shape = shape
@@ -117,7 +205,19 @@ public struct CameraBubble: Codable, Sendable, Equatable {
         self.size = size
         self.border = border
         self.mirror = mirror
+        self.roundness = roundness
+        self.zoomedScale = zoomedScale
     }
+
+    /// Size multiplier for the current camera zoom; shared by preview and export.
+    public func sizeMultiplier(cameraScale: Double) -> Double {
+        CameraBubbleGeometry.sizeMultiplier(cameraScale: cameraScale, zoomedScale: zoomedScale)
+    }
+}
+
+/// Free-function form of `CameraBubbleGeometry.sizeMultiplier` using the default `zoomedScale` or a given one.
+public func bubbleSizeMultiplier(cameraScale: Double, zoomedScale: Double = 0.6) -> Double {
+    CameraBubbleGeometry.sizeMultiplier(cameraScale: cameraScale, zoomedScale: zoomedScale)
 }
 
 public struct Style: Codable, Sendable, Equatable {
@@ -197,7 +297,10 @@ extension CameraBubble {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         let d = CameraBubble()
         visible = try c.decodeIfPresent(Bool.self, forKey: .visible) ?? d.visible
-        shape = try c.decodeIfPresent(CameraShape.self, forKey: .shape) ?? d.shape
+        let legacy = try c.decodeIfPresent(LegacyCameraShape.self, forKey: .shape)
+        shape = legacy?.shape ?? d.shape
+        roundness = try c.decodeIfPresent(Double.self, forKey: .roundness) ?? legacy?.roundness ?? d.roundness
+        zoomedScale = try c.decodeIfPresent(Double.self, forKey: .zoomedScale) ?? d.zoomedScale
         position = try c.decodeIfPresent(NormalizedPoint.self, forKey: .position) ?? d.position
         size = try c.decodeIfPresent(Double.self, forKey: .size) ?? d.size
         // v1 field, optional: a missing key means nil (border off), not the default.

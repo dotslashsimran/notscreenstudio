@@ -35,7 +35,7 @@ public struct Project: Codable, Sendable, Equatable, Identifiable {
 }
 
 /// Reference to a project bundle on disk (a `.nssproj` directory).
-public struct ProjectReference: Sendable, Equatable, Hashable {
+public struct ProjectReference: Codable, Sendable, Equatable, Hashable {
     public var url: URL
     public init(url: URL) { self.url = url }
     public static let fileExtension = "nssproj"

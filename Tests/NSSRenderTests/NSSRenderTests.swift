@@ -91,7 +91,7 @@ import NSSCore
         var b = CameraBubble(shape: .circle, position: NormalizedPoint(x: 0.5, y: 0.5), size: 0.2)
         let circle = l.cameraBubbleRect(b, cameraSize: PixelSize(width: 1280, height: 720))
         #expect(circle.width == 384 && circle.height == 384 && circle.midX == 960 && circle.midY == 540)
-        b.shape = .rectangle
+        b.shape = .wide
         let rect = l.cameraBubbleRect(b, cameraSize: PixelSize(width: 1280, height: 720))
         #expect(rect.width == 384 && abs(rect.height - 216) < 1e-9)
     }

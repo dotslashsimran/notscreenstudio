@@ -63,7 +63,7 @@ final class CameraBubbleView: NSView {
         super.layout()
         previewLayer.frame = bounds
         layer?.cornerRadius = BubbleGeometry.cornerRadius(for: shape, size: bounds.size)
-        layer?.cornerCurve = { if case .squircle = shape { return .continuous } else { return .circular } }()
+        layer?.cornerCurve = .circular
     }
 
     override func scrollWheel(with event: NSEvent) {
