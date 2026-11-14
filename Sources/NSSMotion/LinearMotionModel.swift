@@ -1,6 +1,8 @@
 import NSSCore
 
-/// STUB (Motion worker replaces): identity camera, raw interpolated cursor, no ripples.
+/// Minimal reference model: identity camera, raw interpolated cursor, no ripples.
+/// Kept so existing call sites (e.g. the NSSExport stub default) keep compiling; the real model is
+/// `SpringMotionModel` (use `SpringMotionModel.factory(sourceAspect:)`).
 public struct LinearMotionModel: MotionModel {
     public let track: CursorTrack
     public let timeline: Timeline

@@ -31,11 +31,34 @@ public struct CursorState: Codable, Sendable, Equatable {
     public var velocity: NormalizedPoint
     public var visible: Bool
     public var ripples: [RippleState]
-    public init(position: NormalizedPoint = .center, velocity: NormalizedPoint = .zero, visible: Bool = true, ripples: [RippleState] = []) {
+    /// 0...1 cursor opacity (idle fade). Multiply into the cursor's alpha; 1 = fully opaque.
+    /// `visible == false` implies nothing is drawn regardless of opacity.
+    public var opacity: Double
+    public init(
+        position: NormalizedPoint = .center,
+        velocity: NormalizedPoint = .zero,
+        visible: Bool = true,
+        ripples: [RippleState] = [],
+        opacity: Double = 1
+    ) {
         self.position = position
         self.velocity = velocity
         self.visible = visible
         self.ripples = ripples
+        self.opacity = opacity
+    }
+}
+
+// Forward compatibility: fields added after v1 decode with defaults when absent (see PLAN.md).
+extension CursorState {
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let d = CursorState()
+        position = try c.decodeIfPresent(NormalizedPoint.self, forKey: .position) ?? d.position
+        velocity = try c.decodeIfPresent(NormalizedPoint.self, forKey: .velocity) ?? d.velocity
+        visible = try c.decodeIfPresent(Bool.self, forKey: .visible) ?? d.visible
+        ripples = try c.decodeIfPresent([RippleState].self, forKey: .ripples) ?? d.ripples
+        opacity = try c.decodeIfPresent(Double.self, forKey: .opacity) ?? d.opacity
     }
 }
 
