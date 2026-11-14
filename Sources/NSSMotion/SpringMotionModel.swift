@@ -1,8 +1,10 @@
 import Foundation
 import NSSCore
 
-/// The real `MotionModel`: spring camera with auto-zoom, spring-smoothed cursor, idle fade and
-/// click ripples.
+/// The real `MotionModel`: spring camera with auto-zoom, spring-smoothed cursor, idle fade, click
+/// ripples, cursor shapes (with short flickers removed) and the press squish.
+///
+/// The camera's viewport never leaves the source frame; see `SourceViewport` for the exact contract.
 ///
 /// Determinism: everything stateful (springs, dead zone, idle fade) is simulated ONCE at init with
 /// a fixed step (`MotionTuning.simulationRate`, 240 Hz) from the trim start, where all springs
@@ -26,8 +28,10 @@ public struct SpringMotionModel: MotionModel {
     private let rawCursor: Bool
     private let rippleTimes: [MediaTime]
     private let ripplePoints: [NormalizedPoint]
+    /// Shape changes with flickers shorter than `MotionTuning.minShapeDuration` removed.
+    private let shapeTrack: CursorTrack
 
-    /// Compact per-step state: 32 bytes. 10 minutes at 240 Hz is ~4.6 MB.
+    /// Compact per-step state: 36 bytes. 10 minutes at 240 Hz is ~5.2 MB.
     struct SimFrame {
         var logScale: Float
         var focusX: Float
@@ -37,6 +41,7 @@ public struct SpringMotionModel: MotionModel {
         var cursorVX: Float
         var cursorVY: Float
         var opacity: Float
+        var pressScale: Float
     }
 
     /// - Parameters:
@@ -53,8 +58,9 @@ public struct SpringMotionModel: MotionModel {
         let samples = track.samples.filter { $0.t.isFinite && $0.x.isFinite && $0.y.isFinite }
         let track = CursorTrack(
             samples: samples.isSorted ? samples : samples.sorted { $0.t < $1.t },
-            clicks: track.clicks,
-            sampleRate: track.sampleRate
+            clicks: track.clicks.filter { $0.t.isFinite && $0.x.isFinite && $0.y.isFinite },
+            sampleRate: track.sampleRate,
+            shapes: track.shapes
         )
         var duration = duration.isFinite ? duration : 0
         if duration <= 0 {
@@ -79,6 +85,7 @@ public struct SpringMotionModel: MotionModel {
         self.startTime = start
         self.endTime = end
         self.rawCursor = tuning.cursorSpring(smoothing: cursorStyle.smoothing) == nil
+        self.shapeTrack = CursorTrack(shapes: Self.stableShapes(track.shapes, minDuration: tuning.minShapeDuration))
 
         let segments = ZoomPlanner.segments(track: track, timeline: timeline, duration: duration, sourceAspect: sourceAspect, tuning: tuning)
         self.zoomSegments = segments
@@ -112,14 +119,12 @@ public struct SpringMotionModel: MotionModel {
         let a = frames[i], b = frames[i + 1]
         @inline(__always) func mix(_ x: Float, _ y: Float) -> Double { Double(x + (y - x) * f) }
 
-        // Camera: interpolated spring state, then clamp the viewport inside the source.
-        let scale = max(1, exp(mix(a.logScale, b.logScale)))
-        let half = 0.5 / scale
-        let center = NormalizedPoint(
-            x: min(max(mix(a.focusX, b.focusX), half), 1 - half),
-            y: min(max(mix(a.focusY, b.focusY), half), 1 - half)
+        // Camera: interpolated spring state, then clamp the viewport inside the source. This clamp runs
+        // after the springs, so overshoot can never move the viewport outside (see `SourceViewport`).
+        let camera = CameraState.clampedToSource(
+            scale: exp(mix(a.logScale, b.logScale)),
+            center: NormalizedPoint(x: mix(a.focusX, b.focusX), y: mix(a.focusY, b.focusY))
         )
-        let camera = CameraState(scale: scale, center: center)
 
         // Cursor.
         let hasCursor = !track.samples.isEmpty
@@ -132,7 +137,9 @@ public struct SpringMotionModel: MotionModel {
             velocity: hasCursor ? velocity : .zero,
             visible: hasCursor && opacity > 0,
             ripples: ripples(at: tc),
-            opacity: opacity
+            opacity: opacity,
+            shape: shapeTrack.shape(at: tc),
+            pressScale: hasCursor ? mix(a.pressScale, b.pressScale) : 1
         )
         return FrameState(time: t, camera: camera, cursor: cursor)
     }
@@ -165,6 +172,26 @@ public struct SpringMotionModel: MotionModel {
         return out
     }
 
+    /// Removes shape changes that are replaced within `minDuration` (flicker): the shape before a
+    /// flicker simply continues. Then merges repeats. Changes that are kept apply at their own time.
+    static func stableShapes(_ changes: [CursorShapeChange], minDuration: Double) -> [CursorShapeChange] {
+        let sorted = changes.enumerated()
+            .filter { $0.element.t.isFinite }
+            .sorted { $0.element.t != $1.element.t ? $0.element.t < $1.element.t : $0.offset < $1.offset }
+            .map(\.element)
+        let minDuration = minDuration.isFinite ? max(minDuration, 0) : 0
+        var out: [CursorShapeChange] = []
+        out.reserveCapacity(sorted.count)
+        for (i, c) in sorted.enumerated() {
+            let next = i + 1 < sorted.count ? sorted[i + 1].t : .infinity
+            if next - c.t < minDuration { continue }
+            // Before the first change the arrow is implied, so a leading arrow is redundant too.
+            if (out.last?.shape ?? .arrow) == c.shape { continue }
+            out.append(c)
+        }
+        return out
+    }
+
     // MARK: Simulation
 
     private static func simulate(
@@ -192,6 +219,10 @@ public struct SpringMotionModel: MotionModel {
         var cursor = RawCursor(samples: track.samples)
         var planner = CameraPlanner(segments: segments, tuning: tuning)
         var activity = ActivityTracker(track: track, tuning: tuning, hideWhenIdle: cursorStyle.hideWhenIdle)
+        var presses = PressTracker(clicks: track.clicks, minHold: tuning.pressMinHold)
+        let pressDownStep = tuning.pressDownSpring.stepper(dt: dt)
+        let pressReleaseStep = tuning.pressReleaseSpring.stepper(dt: dt)
+        let pressedScale = tuning.pressScale.isFinite ? min(max(tuning.pressScale, 0.1), 1) : 1
 
         // Settled initial state at the trim start.
         let raw0 = cursor.position(at: start)
@@ -202,12 +233,13 @@ public struct SpringMotionModel: MotionModel {
         var cx = raw0?.x ?? 0.5, cxV = 0.0
         var cy = raw0?.y ?? 0.5, cyV = 0.0
         var opacity = activity.settledOpacity(at: start)
+        var press = presses.isPressed(at: start) ? pressedScale : 1, pressV = 0.0
 
         func record() {
             frames.append(SimFrame(
                 logScale: Float(logScale), focusX: Float(fx), focusY: Float(fy),
                 cursorX: Float(cx), cursorY: Float(cy), cursorVX: Float(cxV), cursorVY: Float(cyV),
-                opacity: Float(opacity)
+                opacity: Float(opacity), pressScale: Float(press)
             ))
         }
         // Raw-cursor velocity: slope of the raw track (finite difference over one step).
@@ -236,6 +268,11 @@ public struct SpringMotionModel: MotionModel {
                 }
             }
             opacity = activity.opacity(after: opacity, at: t, dt: dt)
+            if presses.isPressed(at: t) {
+                pressDownStep.step(&press, &pressV, target: pressedScale)
+            } else {
+                pressReleaseStep.step(&press, &pressV, target: 1)
+            }
             prevRaw = raw
             record()
         }
@@ -277,8 +314,7 @@ struct CameraPlanner {
     }
 
     static func clampFocus(_ p: NormalizedPoint, scale: Double) -> NormalizedPoint {
-        let h = 0.5 / max(scale, 1)
-        return NormalizedPoint(x: min(max(p.x, h), 1 - h), y: min(max(p.y, h), 1 - h))
+        CameraState.clampedToSource(scale: scale, center: p).center
     }
 
     /// - Parameter currentScale: the camera's current (spring) scale, used to delay re-aiming
@@ -313,6 +349,46 @@ struct CameraPlanner {
             focus = Self.clampFocus(f, scale: seg.scale)
         }
         return (seg.scale, focus)
+    }
+}
+
+/// When a mouse button is held. Each mouse-down is paired with the next mouse-up of the same button and
+/// held for at least `minHold` (a down without an up is held for `minHold`). Overlapping holds (several
+/// buttons) are merged. Queried with non-decreasing times.
+struct PressTracker {
+    private(set) var intervals: [(start: MediaTime, end: MediaTime)] = []
+    private var i = 0
+
+    init(clicks: [ClickEvent], minHold: Double) {
+        let hold = minHold.isFinite ? max(minHold, 0) : 0
+        let events = clicks.enumerated()
+            .filter { $0.element.t.isFinite }
+            .sorted { $0.element.t != $1.element.t ? $0.element.t < $1.element.t : $0.offset < $1.offset }
+            .map(\.element)
+        var raw: [(start: MediaTime, end: MediaTime)] = []
+        var open: [MouseButton: Int] = [:]
+        for e in events {
+            switch e.kind {
+            case .down:
+                open[e.button] = raw.count
+                raw.append((e.t, e.t + hold))
+            case .up:
+                if let k = open.removeValue(forKey: e.button) { raw[k].end = max(raw[k].end, e.t) }
+            }
+        }
+        raw.sort { $0.start < $1.start }
+        for r in raw {
+            if let last = intervals.last, r.start <= last.end {
+                intervals[intervals.count - 1].end = max(last.end, r.end)
+            } else {
+                intervals.append(r)
+            }
+        }
+    }
+
+    mutating func isPressed(at t: MediaTime) -> Bool {
+        while i < intervals.count, intervals[i].end <= t { i += 1 }
+        return i < intervals.count && intervals[i].start <= t
     }
 }
 

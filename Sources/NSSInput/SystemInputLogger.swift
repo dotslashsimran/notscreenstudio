@@ -12,7 +12,12 @@ import QuartzCore
 /// *mouse* events (move, down, up) are not gated. Only global monitors for *keyboard* events need
 /// Accessibility / Input Monitoring, and this logger never listens to the keyboard. Display and window
 /// bounds are readable without Screen Recording permission. Note that a global monitor does not see events
-/// delivered to this app's own windows, so a local monitor is installed too.
+/// delivered to this app's own windows, so a local monitor is installed too. The cursor shape is read with
+/// `NSCursor.currentSystem`, which needs no permission either (see `SystemCursorShapeSampler`).
+///
+/// ## Cursor shapes
+/// The shape (arrow, I-beam, pointing hand, ...) is sampled at `shapeRate` Hz (30 by default) on its own
+/// utility queue, separate from the 120 Hz position timer, and stored in `CursorTrack.shapes` as change events.
 ///
 /// ## Clock
 /// Samples and clicks are stamped on the `CACurrentMediaTime()` host clock, the same clock as
@@ -21,21 +26,37 @@ public actor SystemInputLogger: InputLogger {
     private let schedule: SamplingSchedule
     private let geometry: any ScreenGeometryProvider
     private let monitorClicks: Bool
+    private let shapeRate: Double
+    private let shapeSampler: CursorShapeSampler?
+    private let logCursorShapes: Bool
     private var recorder: CursorRecorder?
+    private var shapeRecorder: CursorShapeRecorder?
+    private var shapeTimer: DispatchSourceTimer?
     private var timer: DispatchSourceTimer?
     private var refreshTimer: DispatchSourceTimer?
     private var monitors: ClickMonitors?
     private let queue = DispatchQueue(label: "notscreenstudio.input.sampler", qos: .userInteractive)
     private let refreshQueue = DispatchQueue(label: "notscreenstudio.input.geometry", qos: .utility)
+    private let shapeQueue = DispatchQueue(label: "notscreenstudio.input.cursorShape", qos: .utility)
 
+    /// - Parameters:
+    ///   - logCursorShapes: record `CursorTrack.shapes`. When false, `shapes` stays empty (drawn as the arrow).
+    ///   - shapeRate: cursor shape sampling rate in Hz.
+    ///   - shapeSampler: reads the current shape; nil uses `SystemCursorShapeSampler.make()`, built at `start`.
     public init(
         sampleRate: Double = 120,
         geometry: any ScreenGeometryProvider = SystemScreenGeometry(),
-        monitorClicks: Bool = true
+        monitorClicks: Bool = true,
+        logCursorShapes: Bool = true,
+        shapeRate: Double = 30,
+        shapeSampler: CursorShapeSampler? = nil
     ) {
         self.schedule = SamplingSchedule(rate: sampleRate)
         self.geometry = geometry
         self.monitorClicks = monitorClicks
+        self.logCursorShapes = logCursorShapes
+        self.shapeRate = SamplingSchedule(rate: shapeRate).rate
+        self.shapeSampler = shapeSampler
     }
 
     public func start(source: CaptureSource) async throws {
@@ -80,6 +101,23 @@ public actor SystemInputLogger: InputLogger {
         refresh.setEventHandler { recorder.refreshRect() }
         refresh.resume()
         refreshTimer = refresh
+
+        if logCursorShapes {
+            startShapeSampling()
+        }
+    }
+
+    private func startShapeSampling() {
+        // The standard-cursor fingerprints are built once, here, not per sample.
+        guard let sampler = shapeSampler ?? SystemCursorShapeSampler.make() else { return }
+        let shapes = CursorShapeRecorder(sampler: sampler, clock: { CACurrentMediaTime() })
+        shapeRecorder = shapes
+        let interval = SamplingSchedule(rate: shapeRate).intervalNanoseconds
+        let timer = DispatchSource.makeTimerSource(queue: shapeQueue)
+        timer.schedule(deadline: .now(), repeating: .nanoseconds(interval), leeway: .milliseconds(2))
+        timer.setEventHandler { shapes.tick() }
+        timer.resume()
+        shapeTimer = timer
     }
 
     public func stop(recordingStartHostTime: Double) async -> CursorTrack {
@@ -88,6 +126,10 @@ public actor SystemInputLogger: InputLogger {
         timer = nil
         refreshTimer?.cancel()
         refreshTimer = nil
+        shapeTimer?.cancel()
+        shapeTimer = nil
+        let shapes = shapeRecorder
+        shapeRecorder = nil
         let monitors = self.monitors
         self.monitors = nil
         let recorder = self.recorder
@@ -96,7 +138,11 @@ public actor SystemInputLogger: InputLogger {
             await MainActor.run { monitors.remove() }
         }
         guard let recorder else { return .empty }
-        return recorder.finish(recordingStartHostTime: recordingStartHostTime, sampleRate: schedule.rate)
+        var track = recorder.finish(recordingStartHostTime: recordingStartHostTime, sampleRate: schedule.rate)
+        // Wait for an in-flight shape tick so the recorder is read after its last write.
+        shapeQueue.sync {}
+        track.shapes = shapes?.finish(recordingStartHostTime: recordingStartHostTime) ?? []
+        return track
     }
 }
 

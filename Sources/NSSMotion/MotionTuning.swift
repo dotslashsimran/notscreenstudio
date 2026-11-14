@@ -7,7 +7,7 @@ public struct MotionTuning: Sendable, Equatable {
 
     /// Fixed simulation rate (Hz) the springs are integrated at during the build.
     public var simulationRate: Double = 240
-    /// Hard cap on the simulated table (32 bytes per frame, so 1M frames is 32 MB, about 69 min at
+    /// Hard cap on the simulated table (36 bytes per frame, so 1M frames is 36 MB, about 69 min at
     /// 240 Hz). Longer ranges lower the effective rate instead (the springs are analytic, so any step
     /// is stable). Guards against bogus durations or absolute timestamps in the track.
     public var maxSimulationFrames: Int = 1_000_000
@@ -75,6 +75,23 @@ public struct MotionTuning: Sendable, Equatable {
 
     /// A click ripple runs from progress 0 to 1 over this duration after each mouse-down.
     public var rippleDuration: Double = 0.45
+
+    // MARK: Cursor shape
+
+    /// Shape changes that last less than this are ignored, so a cursor that flickers between shapes
+    /// (for example while crossing a one-pixel border) keeps drawing the surrounding shape.
+    public var minShapeDuration: Double = 0.05
+
+    // MARK: Press squish
+
+    /// `CursorState.pressScale` while a mouse button is held down.
+    public var pressScale: Double = 0.82
+    /// Spring toward `pressScale` on mouse-down: quick, critically damped (no bounce).
+    public var pressDownSpring = Spring(response: 0.1, dampingRatio: 1)
+    /// Spring back to 1 on mouse-up: underdamped for a small overshoot (about 2% above 1 with the defaults).
+    public var pressReleaseSpring = Spring(response: 0.35, dampingRatio: 0.55)
+    /// A press counts as held for at least this long, so a click with no visible hold still squishes.
+    public var pressMinHold: Double = 0.08
 
     public init() {}
 
