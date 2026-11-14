@@ -19,17 +19,22 @@ public struct MP4Exporter: Exporter {
     public typealias FrameSourceFactory = @Sendable (_ screenURL: URL, _ cameraURL: URL?) async throws -> any FrameSource
 
     public let motionFactory: MotionModelFactory
+    /// When set, the motion model is built for the recording's real source aspect (width / height of
+    /// `assets.sourcePixelSize`) instead of `motionFactory`, so auto-zoom matches the preview for any source.
+    public let motionFactoryForAspect: (@Sendable (_ sourceAspect: Double) -> MotionModelFactory)?
     public let renderer: any FrameRenderer
     public let frameSourceFactory: FrameSourceFactory
 
     public init(
         motionFactory: @escaping MotionModelFactory = LinearMotionModel.factory,
         renderer: any FrameRenderer = PassthroughRenderer(),
+        motionFactoryForAspect: (@Sendable (_ sourceAspect: Double) -> MotionModelFactory)? = nil,
         frameSourceFactory: @escaping FrameSourceFactory = { screen, camera in
             try await AssetFrameSource.make(screenURL: screen, cameraURL: camera)
         }
     ) {
         self.motionFactory = motionFactory
+        self.motionFactoryForAspect = motionFactoryForAspect
         self.renderer = renderer
         self.frameSourceFactory = frameSourceFactory
     }
@@ -87,7 +92,8 @@ public struct MP4Exporter: Exporter {
         let totalFrames = max(1, Int((length * Double(fps)).rounded()))
 
         let size = preset.outputSize(for: project.style.aspectRatio)
-        let motion = motionFactory(track, project.timeline, project.style.cursor, duration)
+        let factory = motionFactoryForAspect?(assets.sourcePixelSize.aspect) ?? motionFactory
+        let motion = factory(track, project.timeline, project.style.cursor, duration)
         let frames = try await frameSourceFactory(screenURL, cameraURL)
         let audio = try await AudioPump.make(urls: [micURL, screenURL].compactMap { $0 }, start: start, length: length)
 

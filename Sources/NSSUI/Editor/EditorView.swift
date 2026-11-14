@@ -5,20 +5,6 @@ import NSSMotion
 import NSSProject
 import NSSRender
 
-extension EditorDependencies {
-    /// Production wiring: the on-disk project store plus whichever motion/render/export implementations are linked in.
-    public static func live() -> EditorDependencies {
-        let renderer: any FrameRenderer = PassthroughRenderer()
-        return EditorDependencies(
-            store: FileProjectStore(),
-            motionFactory: SpringMotionModel.factory,
-            renderer: renderer,
-            exporter: MP4Exporter(motionFactory: SpringMotionModel.factory, renderer: renderer),
-            motionFactoryForAspect: { SpringMotionModel.factory(sourceAspect: $0) }
-        )
-    }
-}
-
 /// Everything alive while one project is open in the editor.
 @MainActor
 final class EditorSession {

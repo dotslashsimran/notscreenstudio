@@ -16,3 +16,5 @@ jobs:
         run: swift build
       - name: Test
         run: swift test
+      - name: App smoke test
+        run: swift run NotScreenStudio --smoke-test

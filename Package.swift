@@ -41,6 +41,8 @@ targets.append(tests("NSSMotion", ["NSSMotion", "NSSCore"]))
 targets.append(tests("NSSRender", ["NSSRender", "NSSCore"]))
 targets.append(tests("NSSExport", ["NSSExport", "NSSCore", "NSSRender", "NSSMotion"]))
 targets.append(tests("NSSUI", ["NSSUI", "NSSCore"]))
+// Cross-module end-to-end tests: synthetic bundle -> store -> motion -> Metal -> MP4, plus preview timing.
+targets.append(tests("NSSIntegration", allModules + ["NSSUI"]))
 targets.append(
     Target.executableTarget(
         name: "NotScreenStudio",

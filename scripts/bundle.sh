@@ -7,7 +7,8 @@ APP_NAME="NotScreenStudio"
 BUNDLE_ID="dev.notscreenstudio.app"
 APP="build/${APP_NAME}.app"
 
-swift build -c release
+JOBS="${NSS_JOBS:-2}"
+swift build -c release -j "$JOBS"
 BIN="$(swift build -c release --show-bin-path)/${APP_NAME}"
 
 rm -rf "$APP"
@@ -37,4 +38,9 @@ PLIST
 
 codesign --force --deep -s - "$APP"
 codesign --verify --verbose "$APP"
+# Non-interactive launch check: builds every dependency and renders one frame, then exits 0.
+# Set NSS_SKIP_SMOKE=1 to skip it (for example over SSH without a GUI session).
+if [ "${NSS_SKIP_SMOKE:-0}" != "1" ]; then
+  "$APP/Contents/MacOS/${APP_NAME}" --smoke-test
+fi
 echo "Built $APP"
