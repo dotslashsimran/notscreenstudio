@@ -17,3 +17,7 @@ public protocol Exporter: Sendable {
         progress: @escaping @Sendable (ExportProgress) -> Void
     ) async throws
 }
+
+/// Source-compatibility alias: NSSUI/Editor still constructs `StubExporter(motionFactory:renderer:)`.
+/// It is now the real exporter. New code should use `MP4Exporter` directly.
+public typealias StubExporter = MP4Exporter
