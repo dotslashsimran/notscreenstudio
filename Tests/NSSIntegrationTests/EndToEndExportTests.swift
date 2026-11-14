@@ -63,12 +63,28 @@ import NSSRender
             #expect(near(px, bg.r, bg.g, bg.b, tol: 12), "corner (\(x),\(y)) = \(px)")
         }
 
-        // --- camera bubble: its centre shows the camera colour
-        let layout0 = RenderLayout(outputSize: size, sourceSize: Synthetic.size, style: project.style, camera: CameraState())
+        // --- camera bubble: its centre shows the camera colour (at frame 0's zoom, where the bubble may have shrunk)
+        let motion0 = SpringMotionModel.factory(sourceAspect: Synthetic.size.aspect)(
+            bundle.track, project.timeline, project.style.cursor, Synthetic.duration)
+        let layout0 = RenderLayout(outputSize: size, sourceSize: Synthetic.size, style: project.style,
+                                   camera: motion0.frameState(at: Synthetic.trim.start).camera)
         let bubble = layout0.cameraBubbleRect(project.style.camera, cameraSize: Synthetic.cameraSize)
         let c = Synthetic.cameraColor
         let bubblePx = meanPixel(first, Int(bubble.midX), Int(bubble.midY))
         #expect(near(bubblePx, c.r, c.g, c.b, tol: 16), "bubble centre = \(bubblePx)")
+        // When frame 0 is zoomed, the bubble has shrunk toward its anchor: a point inside the full-size
+        // bubble but well outside the shrunk one must not show the camera.
+        let fullBubble = layout0.cameraBubbleFullRect(project.style.camera)
+        if bubble.width < fullBubble.width * 0.9 {
+            let ax = RenderLayout.bubbleAnchor(project.style.camera.position.x)
+            let ay = RenderLayout.bubbleAnchor(project.style.camera.position.y)
+            // The full rect's point farthest from the anchor, 10% in from its edges.
+            let ox = fullBubble.minX + (ax < 0.5 ? 0.9 : 0.1) * fullBubble.width
+            let oy = fullBubble.minY + (ay < 0.5 ? 0.9 : 0.1) * fullBubble.height
+            #expect(!bubble.contains(CGPoint(x: ox, y: oy)))
+            let outside = meanPixel(first, Int(ox), Int(oy))
+            #expect(!near(outside, c.r, c.g, c.b, tol: 40), "full-size bubble area at frame 0 = \(outside), bubble did not shrink")
+        }
 
         // --- zoomed in on content shortly after a click
         let motion = SpringMotionModel.factory(sourceAspect: Synthetic.size.aspect)(

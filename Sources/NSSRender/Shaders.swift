@@ -14,13 +14,15 @@ enum Slot: Int, CaseIterable {
     case solid          // linear rgb, alpha
     case stop0, stop1, stop2, stop3, stop4, stop5, stop6, stop7   // OKLab + alpha
     case loc0, loc1, loc2, loc3, loc4, loc5, loc6, loc7           // location (gradient) or position xy (wallpaper)
-    case cursor         // tip x, tip y (px), px per cursor unit, alpha
-    case cursorBlur     // blur x, blur y (px), samples, 0
+    case cursor         // hotspot x, hotspot y (px), px per cursor point (incl. press squish), alpha
+    case cursorBlur     // blur x, blur y (px), samples, atlas mip level
     case cursorBox      // minX, minY, maxX, maxY (px)
+    case cursorCell     // atlas uv of the cell's image area: x, y, w, h
+    case cursorCell2    // hotspot x, y (pt from the image's top-left), image w, h (pt)
     case rippleParams   // count, thickness px, 0, 0
     case ripple0, ripple1, ripple2, ripple3, ripple4, ripple5, ripple6, ripple7  // x, y, radius, alpha
     case bubble         // centre x, centre y, half w, half h (px)
-    case bubble2        // shape (0 circle, 1 rounded rect, 2 squircle, 3 rect), corner radius px, border px, visible
+    case bubble2        // 0, corner radius px, border px, visible
     case bubbleUV       // uv scale x, uv scale y, mirror, taps per axis
     case bubbleSS       // duv.x, duv.y per output px, 0, 0
     case borderColor    // linear rgb, alpha
@@ -99,48 +101,17 @@ enum ShaderSource {
             return 0.5 - 0.5 * erfApprox(d / (sigma * 1.41421356));
         }
 
-        // macOS-style arrow, tip at the origin, y down, in cursor units (~19 units tall).
-        constant float2 kArrow[7] = {
-            float2(0.0, 0.0), float2(0.0, 16.6), float2(4.1, 12.7), float2(6.9, 19.0),
-            float2(9.5, 17.9), float2(6.8, 11.8), float2(12.0, 11.8)
-        };
-
-        static float sdArrow(float2 p) {
-            float d = dot(p - kArrow[0], p - kArrow[0]);
-            float s = 1.0;
-            for (int i = 0, j = 6; i < 7; j = i, i++) {
-                float2 e = kArrow[j] - kArrow[i];
-                float2 w = p - kArrow[i];
-                float2 b = w - e * clamp(dot(w, e) / dot(e, e), 0.0, 1.0);
-                d = min(d, dot(b, b));
-                bool c1 = p.y >= kArrow[i].y, c2 = p.y < kArrow[j].y, c3 = e.x * w.y > e.y * w.x;
-                if ((c1 && c2 && c3) || (!c1 && !c2 && !c3)) { s = -s; }
-            }
-            return s * sqrt(d);
-        }
-
-        static float sdBubble(float2 q, float2 hs, int shape, float radius) {
-            if (shape == 0) { return length(q) - min(hs.x, hs.y); }
-            if (shape == 1) { return sdRoundBox(q, hs, radius); }
-            if (shape == 2) {
-                const float n = 5.0;
-                float2 a = abs(q) / hs;
-                float k = pow(pow(a.x, n) + pow(a.y, n), 1.0 / n);
-                return (k - 1.0) * min(hs.x, hs.y);
-            }
-            return sdRoundBox(q, hs, 0.0);
-        }
-
         // Footprint-aware fetch: `taps` x `taps` bilinear samples spread over the output pixel's
-        // footprint (`duv` in uv units). taps == 1 is a plain bilinear fetch.
+        // footprint (`duv` in uv units). taps == 1 is a plain bilinear fetch. Every tap is clamped to
+        // the source (0...1), so nothing outside the texture is ever read.
         static float4 sampleFootprint(texture2d<float> t, sampler s, float2 uv, float2 duv, int taps) {
-            if (taps <= 1) { return t.sample(s, uv); }
+            if (taps <= 1) { return t.sample(s, clamp(uv, 0.0, 1.0)); }
             float4 acc = 0.0;
             float inv = 1.0 / float(taps);
             for (int y = 0; y < taps; y++) {
                 for (int x = 0; x < taps; x++) {
                     float2 o = (float2(x, y) + 0.5) * inv - 0.5;
-                    acc += t.sample(s, uv + o * duv);
+                    acc += t.sample(s, clamp(uv + o * duv, 0.0, 1.0));
                 }
             }
             return acc * (inv * inv);
@@ -189,7 +160,8 @@ enum ShaderSource {
                                      constant float4* u [[buffer(0)]],
                                      texture2d<float> screen [[texture(0)]],
                                      texture2d<float> camera [[texture(1)]],
-                                     texture2d<float> image [[texture(2)]]) {
+                                     texture2d<float> image [[texture(2)]],
+                                     texture2d<float> cursorAtlas [[texture(3)]]) {
             constexpr sampler lin(filter::linear, address::clamp_to_edge);
             float2 p = in.pos.xy;
             float3 c = background(p, u, image);
@@ -231,25 +203,25 @@ enum ShaderSource {
                     s = mix(s, float3(1.0), a);
                 }
 
-                // Cursor with motion blur: average N SDF samples along the blur vector.
+                // Cursor: the system cursor image from the atlas (linear, premultiplied, shadow baked in),
+                // hotspot on the cursor position. Motion blur averages N atlas samples along the blur vector.
                 float4 cur = u[U_CURSOR];
                 float4 box = u[U_CURSORBOX];
                 if (cur.w > 0.0 && p.x >= box.x && p.y >= box.y && p.x <= box.z && p.y <= box.w) {
+                    constexpr sampler atlasSampler(filter::linear, mip_filter::linear, address::clamp_to_zero);
                     float4 blur = u[U_CURSORBLUR];
+                    float4 cell = u[U_CURSORCELL];
+                    float4 img = u[U_CURSORCELL2];
                     int n = max(int(blur.z), 1);
-                    float unit = cur.z;
                     float4 acc = 0.0;
                     for (int i = 0; i < n; i++) {
                         float t = (float(i) + 0.5) / float(n) - 0.5;
-                        float2 q = (p - cur.xy - blur.xy * t) / unit;
-                        float d = sdArrow(q);
-                        float dShadow = sdArrow(q - float2(0.0, 1.3)) - 1.4;
-                        float4 col = float4(0.0, 0.0, 0.0, 0.32 * (1.0 - smoothstep(-1.0, 2.6, dShadow)));
-                        float aw = coverage((d - 1.35) * unit);
-                        col = float4(float3(1.0) * aw + col.rgb * (1.0 - aw), aw + col.a * (1.0 - aw));
-                        float ab = coverage(d * unit);
-                        col = float4(col.rgb * (1.0 - ab), ab + col.a * (1.0 - ab));
-                        acc += col;
+                        float2 q = (p - cur.xy - blur.xy * t) / cur.z + img.xy;  // points in the cursor image
+                        // Outside the image (plus a margin inside the cell padding) is transparent;
+                        // this also keeps long blur vectors from reaching neighbouring cells.
+                        if (all(q > -2.0) && all(q < img.zw + 2.0)) {
+                            acc += cursorAtlas.sample(atlasSampler, cell.xy + q / img.zw * cell.zw, level(blur.w));
+                        }
                     }
                     acc *= cur.w / float(n);
                     s = acc.rgb + s * (1.0 - acc.a);
@@ -263,14 +235,13 @@ enum ShaderSource {
             float4 b2 = u[U_BUBBLE2];
             if (b2.w > 0.0) {
                 float4 bb = u[U_BUBBLE];
-                int shape = int(b2.x);
                 float2 q = p - bb.xy;
                 float4 bs = u[U_BUBBLESHADOW];
                 if (bs.y > 0.0) {
-                    float dsh = sdBubble(q - bs.zw, bb.zw, shape, b2.y);
+                    float dsh = sdRoundBox(q - bs.zw, bb.zw, b2.y);
                     c *= 1.0 - bs.y * softShadow(dsh, bs.x);
                 }
-                float d = sdBubble(q, bb.zw, shape, b2.y);
+                float d = sdRoundBox(q, bb.zw, b2.y);
                 float bc = coverage(d);
                 if (bc > 0.0) {
                     float4 buv = u[U_BUBBLEUV];
