@@ -216,6 +216,24 @@ import NSSCore
         for _ in 0..<50 where rig.model.isRecording { try await Task.sleep(for: .milliseconds(20)) }
         #expect(rig.model.phase == .failed("Window closed"))
         #expect(!rig.effects.hudShown)
+        #expect(rig.session.stopCalls == 1)
+        #expect(rig.logger.stopOrigin == 42)
+        // The partial recording is finalized and saved, not left half-written.
+        let saved = try #require(rig.model.lastSaved)
+        #expect(FileManager.default.fileExists(atPath: saved.reference.url.appendingPathComponent("project.json").path))
+    }
+
+    @Test func captureFailureWithNothingRecordedRemovesTheBundle() async throws {
+        let rig = ShellRig()
+        defer { rig.cleanup() }
+        await rig.model.startRecording()
+        let bundle = try #require(rig.session.startedBundle)
+        rig.session.failStop = .io("No screen frames were captured.")
+        rig.session.set(.failed(message: "Display unplugged"))
+        for _ in 0..<50 where rig.model.isRecording { try await Task.sleep(for: .milliseconds(20)) }
+        #expect(rig.model.phase == .failed("Display unplugged"))
+        #expect(rig.session.stopCalls == 1)
+        #expect(!FileManager.default.fileExists(atPath: bundle.path))
     }
 
     @Test func menuBarSymbolReflectsRecordingState() async {

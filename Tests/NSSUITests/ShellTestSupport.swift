@@ -12,6 +12,9 @@ final class ShellFakeSession: RecordingSession, @unchecked Sendable {
     private var _startedOptions: RecordingOptions?
     private var _startedBundle: URL?
     var failStart: NSSError?
+    private var _stopCalls = 0
+    var stopCalls: Int { lock.withLock { _stopCalls } }
+    var failStop: NSSError?
     var stopDuration: MediaTime = 3
     var hostTime: Double = 42
 
@@ -34,6 +37,8 @@ final class ShellFakeSession: RecordingSession, @unchecked Sendable {
     }
 
     func stop() async throws -> RecordingAssets {
+        lock.withLock { _stopCalls += 1 }
+        if let failStop { throw failStop }
         let camera = startedOptions?.cameraDeviceID != nil
         set(.finished)
         return RecordingAssets(

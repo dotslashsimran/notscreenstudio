@@ -234,22 +234,29 @@ public final class ShellModel {
         hideOverlays()
         self.active = nil
         do {
-            let assets = try await services.session.stop()
-            let track = await services.inputLogger.stop(recordingStartHostTime: assets.startHostTime)
-            var style = Style()
-            style.camera = Self.cameraBubble(
-                hasCamera: assets.cameraFile != nil, shape: settings.cameraShape,
-                geometry: bubble ?? (settings.bubbleCenter, settings.bubbleSize))
-            let project = Project(name: Self.projectName(for: now()), assets: assets, style: style)
-            try await services.store.saveCursorTrack(track, for: active.reference, assets: assets)
-            try await services.store.save(project, to: active.reference)
-            lastSaved = SavedRecording(reference: active.reference, project: project, cursorTrack: track)
-            apply(.saved(active.reference))
+            let saved = try await finish(active, bubble: bubble)
+            apply(.saved(saved.reference))
             editorRequestID += 1
         } catch {
             _ = await services.inputLogger.stop(recordingStartHostTime: 0)
             apply(.saveFailed(Self.describe(error)))
         }
+    }
+
+    /// Stops the session (finalizing every file), stops the logger, and saves the project and cursor track.
+    private func finish(_ active: ActiveRecording, bubble: (center: NormalizedPoint, size: Double)?) async throws -> SavedRecording {
+        let assets = try await services.session.stop()
+        let track = await services.inputLogger.stop(recordingStartHostTime: assets.startHostTime)
+        var style = Style()
+        style.camera = Self.cameraBubble(
+            hasCamera: assets.cameraFile != nil, shape: settings.cameraShape,
+            geometry: bubble ?? (settings.bubbleCenter, settings.bubbleSize))
+        let project = Project(name: Self.projectName(for: now()), assets: assets, style: style)
+        try await services.store.saveCursorTrack(track, for: active.reference, assets: assets)
+        try await services.store.save(project, to: active.reference)
+        let saved = SavedRecording(reference: active.reference, project: project, cursorTrack: track)
+        lastSaved = saved
+        return saved
     }
 
     /// Stops and throws the recording away, deleting its bundle.
@@ -323,13 +330,22 @@ public final class ShellModel {
         }
     }
 
+    /// The screen stream ended on its own. Stop the session so the mic and camera stop and every file is
+    /// finalized, then keep whatever was recorded (or remove the bundle if nothing usable exists).
     private func captureEnded(_ message: String) async {
-        let ref = active?.reference
+        guard let active else { return }
+        watchTask = nil
+        let bubble = captureBubble(for: active)
         hideOverlays()
-        active = nil
+        self.active = nil
         apply(.captureFailed(message))
-        _ = await services.inputLogger.stop(recordingStartHostTime: 0)
-        if let ref { notice = "Recording stopped early. Partial files are in \(ref.url.lastPathComponent)." }
+        do {
+            let saved = try await finish(active, bubble: bubble)
+            notice = "Recording stopped early. The partial recording was saved as \(saved.project.name)."
+        } catch {
+            _ = await services.inputLogger.stop(recordingStartHostTime: 0)
+            Self.removeBundle(active.reference, library: services.store.libraryURL)
+        }
     }
 
     // MARK: Pure helpers (tested)
