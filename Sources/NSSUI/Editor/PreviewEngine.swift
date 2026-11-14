@@ -188,8 +188,9 @@ public final class PreviewEngine {
 
     // MARK: Per-frame
 
-    public func tick() {
+    public func tick(dt: Double = 1.0 / 60.0) {
         tickCount += 1
+        defer { model.advanceDisplayPlayhead(dt: dt) }
         var t = model.playhead
         if model.isPlaying {
             let raw = screen.player.currentTime().seconds
@@ -199,7 +200,7 @@ public final class PreviewEngine {
                 pause()
                 model.playhead = t
             } else {
-                if tickCount % 2 == 0 { model.playhead = t }
+                model.playhead = t
                 correctDrift(master: t)
             }
         }

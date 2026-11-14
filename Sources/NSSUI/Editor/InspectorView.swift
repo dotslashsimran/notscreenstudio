@@ -192,7 +192,13 @@ struct InspectorView: View {
             )) {
                 ForEach(InspectorBindings.ShapeKind.allCases) { Text($0.rawValue).tag($0) }
             }
+            EditSlider(model: model, title: "Roundness", value: model.styleBinding(\.camera.roundness, name: "Camera Roundness"),
+                       range: 0...1, format: pct)
+                .disabled(cam.shape == .circle)
+                .opacity(cam.shape == .circle ? 0.4 : 1)
             EditSlider(model: model, title: "Size", value: model.styleBinding(\.camera.size, name: "Camera Size"), range: 0.08...0.4, format: pct)
+            EditSlider(model: model, title: "Shrink when zoomed", value: model.styleBinding(\.camera.zoomedScale, name: "Camera Zoomed Size"),
+                       range: InspectorBindings.zoomedScaleRange, format: pct)
             Toggle("Border", isOn: Binding(
                 get: { cam.border != nil },
                 set: { model.setStyle(\.camera.border, $0 ? CameraBorder() : nil, name: "Camera Border") }

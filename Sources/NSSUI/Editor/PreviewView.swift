@@ -43,7 +43,8 @@ final class PreviewNSView: NSView {
     }
 
     @objc private func onTick(_ sender: CADisplayLink) {
-        MainActor.assumeIsolated { engine?.tick() }
+        let dt = sender.targetTimestamp - sender.timestamp
+        MainActor.assumeIsolated { engine?.tick(dt: dt > 0 ? dt : 1.0 / 60.0) }
     }
 
     private func show(_ pb: CVPixelBuffer) {

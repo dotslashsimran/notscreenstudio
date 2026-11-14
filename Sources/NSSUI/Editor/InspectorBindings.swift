@@ -43,6 +43,9 @@ public enum InspectorBindings {
         public var id: String { rawValue }
     }
 
+    /// Range of the "shrink when zoomed" slider (1 = bubble keeps its size when the view zooms in).
+    public static let zoomedScaleRange: ClosedRange<Double> = 0.3...1
+
     public static func kind(of s: CameraShape) -> ShapeKind {
         switch s {
         case .circle: .circle

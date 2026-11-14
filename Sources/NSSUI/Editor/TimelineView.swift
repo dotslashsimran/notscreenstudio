@@ -59,7 +59,17 @@ struct EditorTimelineView: View {
             }
         }
         .contentShape(Rectangle())
-        .gesture(DragGesture(minimumDistance: 0, coordinateSpace: .named(space)).onChanged { seek(g.time(forX: $0.location.x)) })
+                .gesture(scrubGesture(g))
+    }
+
+    /// Click or drag on the ruler or strip: seeks at once and the drawn playhead follows the mouse exactly.
+    private func scrubGesture(_ g: TimelineGeometry) -> some Gesture {
+        DragGesture(minimumDistance: 0, coordinateSpace: .named(space))
+            .onChanged {
+                model.isScrubbing = true
+                seek(g.time(forX: $0.location.x))
+            }
+            .onEnded { _ in model.isScrubbing = false }
     }
 
     // MARK: Thumbnails + trim
@@ -85,7 +95,7 @@ struct EditorTimelineView: View {
         }
         .clipShape(RoundedRectangle(cornerRadius: 4))
         .contentShape(Rectangle())
-        .gesture(DragGesture(minimumDistance: 0, coordinateSpace: .named(space)).onChanged { seek(g.time(forX: $0.location.x)) })
+                .gesture(scrubGesture(g))
     }
 
     private func trimHandle(x: Double, isStart: Bool, g: TimelineGeometry) -> some View {
@@ -192,8 +202,19 @@ struct EditorTimelineView: View {
     // MARK: Playhead
 
     private func playhead(_ g: TimelineGeometry) -> some View {
-        let x = g.x(for: model.playhead)
-        return ZStack(alignment: .top) {
+        PlayheadLine(model: model, geometry: g)
+    }
+}
+
+/// The drawn playhead. The only reader of `displayPlayhead`, so its per-frame changes invalidate just this
+/// small view and not the ruler, strip, markers or zoom track.
+private struct PlayheadLine: View {
+    let model: EditorModel
+    let geometry: TimelineGeometry
+
+    var body: some View {
+        let x = geometry.x(for: model.displayPlayhead)
+        ZStack(alignment: .top) {
             Rectangle().fill(Color.red).frame(width: 1.5)
             Image(systemName: "arrowtriangle.down.fill").font(.system(size: 9)).foregroundStyle(.red).offset(y: -1)
         }
