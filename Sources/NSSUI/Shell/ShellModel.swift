@@ -284,9 +284,9 @@ public final class ShellModel {
         let track = await services.inputLogger.stop(recordingStartHostTime: assets.startHostTime)
         var style = Style()
         // The bubble was placed over the capture source; `Style.camera` is in output space (padding included).
+        let geometry = bubble ?? (settings.bubbleCenter, settings.bubbleSize)
         let placed = BubbleGeometry.toOutputSpace(
-            center: (bubble ?? (settings.bubbleCenter, settings.bubbleSize)).0,
-            size: (bubble ?? (settings.bubbleCenter, settings.bubbleSize)).1,
+            center: geometry.0, size: geometry.1,
             outputAspect: style.aspectRatio.ratio, sourceAspect: assets.sourcePixelSize.aspect, padding: style.padding)
         style.camera = Self.cameraBubble(hasCamera: assets.cameraFile != nil, shape: settings.cameraShape, geometry: placed)
         let project = Project(name: active.name, assets: assets, style: style)
