@@ -35,4 +35,26 @@ import Testing
         #expect(p.fps == 60)
         #expect(p.outputSize(for: .r9x16) == PixelSize(width: 1080, height: 1920))
     }
+
+    @Test func olderProjectJSONWithoutNewerFieldsStillDecodes() throws {
+        let json = """
+        {"name":"Old","assets":{"sourcePixelSize":{"width":100,"height":50},"frameRate":60,"duration":2},
+         "style":{"padding":0.1,"cursor":{"size":2}},"timeline":{}}
+        """
+        let p = try JSONDecoder().decode(Project.self, from: Data(json.utf8))
+        #expect(p.name == "Old")
+        #expect(p.assets.startHostTime == 0)
+        #expect(p.assets.screenFile == RecordingAssets.defaultScreenFile)
+        #expect(p.style.padding == 0.1)
+        #expect(p.style.cursor.size == 2)
+        #expect(p.style.cursor.smoothing == CursorStyle().smoothing)
+        #expect(p.style.camera == CameraBubble())
+        #expect(p.timeline.autoZoomEnabled)
+    }
+
+    @Test func startHostTimeRoundTrips() throws {
+        let a = RecordingAssets(sourcePixelSize: PixelSize(width: 1, height: 1), frameRate: 60, duration: 1, startHostTime: 12345.678)
+        let back = try JSONDecoder().decode(RecordingAssets.self, from: JSONEncoder().encode(a))
+        #expect(back.startHostTime == 12345.678)
+    }
 }

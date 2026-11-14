@@ -17,19 +17,38 @@ public actor FileProjectStore: ProjectStore {
     private static func encoder() -> JSONEncoder {
         let e = JSONEncoder()
         e.outputFormatting = [.prettyPrinted, .sortedKeys]
-        e.dateEncodingStrategy = .iso8601
+        // Default (deferredToDate) keeps full Double precision, so load(save(p)) == p.
         return e
     }
     private static func decoder() -> JSONDecoder {
         let d = JSONDecoder()
-        d.dateDecodingStrategy = .iso8601
         return d
     }
 
     public func createProject(named name: String) async throws -> ProjectReference {
-        let url = libraryURL.appendingPathComponent("\(name).\(ProjectReference.fileExtension)", isDirectory: true)
-        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
-        return ProjectReference(url: url)
+        let fm = FileManager.default
+        try fm.createDirectory(at: libraryURL, withIntermediateDirectories: true)
+        let base = Self.sanitize(name)
+        var n = 1
+        while true {
+            let leaf = n == 1 ? base : "\(base) \(n)"
+            let url = libraryURL.appendingPathComponent("\(leaf).\(ProjectReference.fileExtension)", isDirectory: true)
+            do {
+                // Non-intermediate create fails if it exists, so an existing bundle is never reused.
+                try fm.createDirectory(at: url, withIntermediateDirectories: false)
+                return ProjectReference(url: url)
+            } catch let e as CocoaError where e.code == .fileWriteFileExists {
+                n += 1
+            }
+        }
+    }
+
+    /// Makes `name` safe as one path component: no separators, no leading dots, never empty.
+    static func sanitize(_ name: String) -> String {
+        var s = String(name.map { "/:\\\0".contains($0) ? "-" : $0 })
+        s = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        while s.hasPrefix(".") { s.removeFirst() }
+        return s.isEmpty ? "Untitled" : s
     }
 
     public func load(_ ref: ProjectReference) async throws -> Project {

@@ -16,10 +16,14 @@ public typealias MotionModelFactory = @Sendable (_ track: CursorTrack, _ timelin
 
 /// Decodes frames of a recording. One instance per asset set. Implementations must be safe to call
 /// from a single background queue; they own any AVAssetReader state and caching.
+/// Owners (see PLAN.md): NSSExport provides the sequential `AVAssetReader`-based `AssetFrameSource`;
+/// NSSUI/Editor provides the real-time `AVPlayerItemVideoOutput`-based source. Both MUST use the
+/// at-or-before frame selection rule below. NSSRender ships `SolidColorFrameSource` as a stub.
 public protocol FrameSource: Sendable {
     /// Decoded screen frame nearest at-or-before `t`. nil if unavailable.
     func screenFrame(at t: MediaTime) async -> CVPixelBuffer?
-    /// Decoded camera frame at `t`, nil when there is no camera track.
+    /// Decoded camera frame nearest at-or-before `t` (same rule as `screenFrame(at:)`, so both consumers
+    /// agree). nil when there is no camera track.
     func cameraFrame(at t: MediaTime) async -> CVPixelBuffer?
 }
 

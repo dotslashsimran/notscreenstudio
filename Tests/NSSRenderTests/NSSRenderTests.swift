@@ -15,4 +15,17 @@ import NSSCore
         let p = CVPixelBufferGetBaseAddress(out)!.assumingMemoryBound(to: UInt8.self)
         #expect(p[2] == 255 && p[1] == 0 && p[0] == 0)  // BGRA: red
     }
+
+    @Test func solidColorFrameSourceReturnsFrames() async throws {
+        let src = try SolidColorFrameSource(width: 4, height: 4, color: RGBAColor(r: 0, g: 1, b: 0))
+        let f = try #require(await src.screenFrame(at: 3.2))
+        #expect(CVPixelBufferGetWidth(f) == 4)
+        CVPixelBufferLockBaseAddress(f, .readOnly)
+        let p = CVPixelBufferGetBaseAddress(f)!.assumingMemoryBound(to: UInt8.self)
+        #expect(p[1] == 255 && p[0] == 0 && p[2] == 0)
+        CVPixelBufferUnlockBaseAddress(f, .readOnly)
+        #expect(await src.cameraFrame(at: 0) == nil)
+        let withCam = try SolidColorFrameSource(width: 2, height: 2, color: .white, hasCamera: true)
+        #expect(await withCam.cameraFrame(at: 0) != nil)
+    }
 }

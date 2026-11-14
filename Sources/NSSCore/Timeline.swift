@@ -49,3 +49,14 @@ public struct Timeline: Codable, Sendable, Equatable {
         self.autoZoomEnabled = autoZoomEnabled
     }
 }
+
+// Forward compatibility: fields added after v1 decode with defaults when absent (see PLAN.md).
+extension Timeline {
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let d = Timeline()
+        trim = try c.decodeIfPresent(TrimRange.self, forKey: .trim) ?? d.trim
+        zoomBlocks = try c.decodeIfPresent([ZoomBlock].self, forKey: .zoomBlocks) ?? d.zoomBlocks
+        autoZoomEnabled = try c.decodeIfPresent(Bool.self, forKey: .autoZoomEnabled) ?? d.autoZoomEnabled
+    }
+}

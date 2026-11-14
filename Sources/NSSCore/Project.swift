@@ -71,3 +71,18 @@ public enum ExportProgress: Sendable, Equatable {
     case failed(message: String)
     case cancelled
 }
+
+// Forward compatibility: fields added after v1 decode with defaults when absent (see PLAN.md).
+extension Project {
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        name = try c.decode(String.self, forKey: .name)
+        createdAt = try c.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
+        modifiedAt = try c.decodeIfPresent(Date.self, forKey: .modifiedAt) ?? createdAt
+        assets = try c.decode(RecordingAssets.self, forKey: .assets)
+        timeline = try c.decodeIfPresent(Timeline.self, forKey: .timeline) ?? Timeline()
+        style = try c.decodeIfPresent(Style.self, forKey: .style) ?? Style()
+        schemaVersion = try c.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? Project.currentSchemaVersion
+    }
+}

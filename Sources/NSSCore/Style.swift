@@ -164,3 +164,43 @@ public struct Style: Codable, Sendable, Equatable {
         }
     }
 }
+
+// Forward compatibility: fields added after v1 decode with defaults when absent (see PLAN.md).
+extension Style {
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let d = Style()
+        background = try c.decodeIfPresent(Background.self, forKey: .background) ?? d.background
+        padding = try c.decodeIfPresent(Double.self, forKey: .padding) ?? d.padding
+        cornerRadius = try c.decodeIfPresent(Double.self, forKey: .cornerRadius) ?? d.cornerRadius
+        shadow = try c.decodeIfPresent(Shadow.self, forKey: .shadow) ?? d.shadow
+        aspectRatio = try c.decodeIfPresent(AspectRatio.self, forKey: .aspectRatio) ?? d.aspectRatio
+        cursor = try c.decodeIfPresent(CursorStyle.self, forKey: .cursor) ?? d.cursor
+        camera = try c.decodeIfPresent(CameraBubble.self, forKey: .camera) ?? d.camera
+    }
+}
+
+extension CursorStyle {
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let d = CursorStyle()
+        size = try c.decodeIfPresent(Double.self, forKey: .size) ?? d.size
+        smoothing = try c.decodeIfPresent(Double.self, forKey: .smoothing) ?? d.smoothing
+        motionBlur = try c.decodeIfPresent(Double.self, forKey: .motionBlur) ?? d.motionBlur
+        clickRipples = try c.decodeIfPresent(Bool.self, forKey: .clickRipples) ?? d.clickRipples
+        hideWhenIdle = try c.decodeIfPresent(Bool.self, forKey: .hideWhenIdle) ?? d.hideWhenIdle
+    }
+}
+
+extension CameraBubble {
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let d = CameraBubble()
+        visible = try c.decodeIfPresent(Bool.self, forKey: .visible) ?? d.visible
+        shape = try c.decodeIfPresent(CameraShape.self, forKey: .shape) ?? d.shape
+        position = try c.decodeIfPresent(NormalizedPoint.self, forKey: .position) ?? d.position
+        size = try c.decodeIfPresent(Double.self, forKey: .size) ?? d.size
+        border = try c.decodeIfPresent(CameraBorder.self, forKey: .border) ?? d.border
+        mirror = try c.decodeIfPresent(Bool.self, forKey: .mirror) ?? d.mirror
+    }
+}

@@ -24,4 +24,4 @@ scripts/bundle.sh
 open build/NotScreenStudio.app
 ```
 
-macOS only grants screen recording, camera and microphone permissions (TCC) to a real app bundle with a bundle identifier and an Info.plist that explains each permission. A bare binary from `.build/` cannot hold those permissions reliably. The script wraps the release binary into `build/NotScreenStudio.app` and signs it ad hoc with `codesign -s -`, so the permission grants stay attached to the bundle.
+macOS only grants screen recording, camera and microphone permissions (TCC) to a real app bundle with a bundle identifier and an Info.plist that explains each permission. A bare binary from `.build/` cannot hold those permissions reliably. The script wraps the release binary into `build/NotScreenStudio.app` and signs it ad hoc with `codesign -s -`, so the app has a stable bundle identifier. Ad-hoc signing gives every rebuild a new code hash, so macOS may treat a rebuilt app as a new app and you may need to grant screen recording, camera and microphone permission again after each rebuild.

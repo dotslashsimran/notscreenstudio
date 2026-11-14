@@ -84,3 +84,18 @@ public enum RecordingState: Codable, Sendable, Equatable {
     case finished
     case failed(message: String)
 }
+
+// Forward compatibility: fields added after v1 decode with defaults when absent (see PLAN.md).
+extension RecordingAssets {
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        screenFile = try c.decodeIfPresent(String.self, forKey: .screenFile) ?? Self.defaultScreenFile
+        cameraFile = try c.decodeIfPresent(String.self, forKey: .cameraFile)
+        micFile = try c.decodeIfPresent(String.self, forKey: .micFile)
+        cursorFile = try c.decodeIfPresent(String.self, forKey: .cursorFile) ?? Self.defaultCursorFile
+        sourcePixelSize = try c.decode(PixelSize.self, forKey: .sourcePixelSize)
+        frameRate = try c.decode(Double.self, forKey: .frameRate)
+        duration = try c.decode(MediaTime.self, forKey: .duration)
+        startHostTime = try c.decodeIfPresent(Double.self, forKey: .startHostTime) ?? 0
+    }
+}

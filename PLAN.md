@@ -26,10 +26,10 @@ Auto-zoom on clicks, a smooth cursor with motion blur, click ripples, background
 | NSSProject | `.nssproj` bundles: create, load, save, autosave | Input + Projects |
 | NSSMotion | Pure Swift MotionModel: spring camera, cursor smoothing, ripples (Opus) | Motion |
 | NSSRender | Metal FrameRenderer and shader sources compiled at runtime (Opus) | Renderer |
-| NSSExport | 60 fps MP4 exporter using MotionModel and FrameRenderer | Export |
+| NSSExport | 60 fps MP4 exporter using MotionModel and FrameRenderer. Also owns `AssetFrameSource`, the sequential `AVAssetReader`-based `FrameSource` | Export |
 | NSSUI/Shell | Menu bar, source picker, recording HUD, camera bubble overlay | App shell UI |
 | NotScreenStudio | App entry point and scene wiring | App shell UI |
-| NSSUI/Editor | Preview, timeline and inspector | Editor UI |
+| NSSUI/Editor | Preview, timeline and inspector. Also owns the real-time `AVPlayerItemVideoOutput`-based `FrameSource` | Editor UI |
 
 ## Phases
 
@@ -50,3 +50,9 @@ Phase 2 is one integration worker. It wires record, edit and export end to end, 
 ## Data flow
 
 Recording writes a `.nssproj` bundle in `~/Movies/notscreenstudio`. The bundle holds the media files, `cursor.json` and `project.json`. The editor loads that bundle. The MotionModel turns the cursor track and the timeline into a FrameState for each frame. The FrameRenderer composites the frame from the screen pixels, the camera pixels, the FrameState and the Style. The preview and the export share the same MotionModel and the same FrameRenderer, so they match exactly.
+
+## Shared contracts worth knowing
+
+- Time origin: t = 0 is the first screen frame. `RecordingAssets.startHostTime` holds its host-clock time (the `CACurrentMediaTime()` clock). `InputLogger.stop(recordingStartHostTime:)` returns a track already rebased to it.
+- `FrameSource` picks the frame nearest at-or-before `t` for both screen and camera. Camera returns nil when there is no camera track. `SolidColorFrameSource` in NSSRender is the stub.
+- Codable policy: every persisted type decodes with `decodeIfPresent` and a default for every field that is not essential, so an older `project.json` without a newer field still loads. New fields must follow this rule.

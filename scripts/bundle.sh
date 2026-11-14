@@ -31,7 +31,6 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>NSHighResolutionCapable</key><true/>
   <key>NSCameraUsageDescription</key><string>notscreenstudio records your camera for the camera bubble. Video never leaves your Mac.</string>
   <key>NSMicrophoneUsageDescription</key><string>notscreenstudio records your microphone for narration. Audio never leaves your Mac.</string>
-  <key>NSScreenCaptureUsageDescription</key><string>notscreenstudio records your screen. Recordings never leave your Mac.</string>
 </dict>
 </plist>
 PLIST
