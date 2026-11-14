@@ -223,6 +223,25 @@ import NSSCore
         #expect(again.editorRequestID == 1)
     }
 
+    @Test func launchSkipsNewerBundlesThatCannotLoad() async throws {
+        let rig = ShellRig()
+        defer { rig.cleanup() }
+        await rig.model.startRecording()
+        await rig.model.stopRecording()
+        let valid = try #require(rig.model.lastSaved).reference
+        // A newer, empty bundle, like one left behind by a crash during recording.
+        let broken = try await rig.store.createProject(named: "Crashed")
+        try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(60)], ofItemAtPath: broken.url.path)
+
+        let again = ShellModel(
+            services: ShellServices(
+                session: rig.session, inputLogger: rig.logger, store: rig.store,
+                sources: StubSourceProvider(), permissions: StubPermissions()),
+            effects: rig.effects, settingsStore: ShellSettingsStore(defaults: rig.defaults))
+        await again.launch()
+        #expect(again.latestProject?.url.standardizedFileURL == valid.url.standardizedFileURL)
+    }
+
     @Test func bubbleGeometryIsSavedIntoProjectAndSettings() async throws {
         let rig = ShellRig(initial: ShellSettings(cameraEnabled: true, cameraShape: .squircle))
         defer { rig.cleanup() }

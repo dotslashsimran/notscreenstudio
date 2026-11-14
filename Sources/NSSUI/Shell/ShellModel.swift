@@ -161,9 +161,18 @@ public final class ShellModel {
 
     /// Call once at launch: reads permissions and asks to show onboarding if screen recording is missing.
     public func launch() async {
-        latestProject = try? await services.store.listProjects().first
+        latestProject = await newestLoadableProject()
         await refreshSources()
         if !missingRequiredPermissions.isEmpty { requestOnboarding() }
+    }
+
+    /// Newest bundle that really loads. A bundle left by a crash during recording (or a failed save) has no
+    /// `project.json`, and must not hide older valid recordings.
+    private func newestLoadableProject() async -> ProjectReference? {
+        for ref in (try? await services.store.listProjects()) ?? [] {
+            if (try? await services.store.load(ref)) != nil { return ref }
+        }
+        return nil
     }
 
     public func requestOnboarding() { onboardingRequestID += 1 }
