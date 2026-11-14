@@ -39,6 +39,9 @@ public final class AutosaveDebouncer: Sendable {
     private let onError: ErrorHandler?
     private let state = OSAllocatedUnfairLock<[URL: Pending]>(initialState: [:])
     private let counter = OSAllocatedUnfairLock<Int>(initialState: 0)
+    /// Serializes every write (autosave fire, flush, explicit save). A pending entry is taken and written
+    /// while holding it, so a superseded autosave can never land after a newer save.
+    private let writeLock = NSLock()
 
     public init(
         delay: Double = 1,
@@ -73,6 +76,15 @@ public final class AutosaveDebouncer: Sendable {
         old?.task?.cancel()
     }
 
+    /// Runs an explicit save exclusively: waits for any in-flight autosave write to finish, drops the pending
+    /// autosave for `ref`, then runs `body`. Whatever `body` writes is therefore the last write for that bundle.
+    public func exclusive<T>(_ ref: ProjectReference, _ body: () throws -> T) rethrows -> T {
+        writeLock.lock()
+        defer { writeLock.unlock() }
+        cancel(ref)
+        return try body()
+    }
+
     public func hasPending(for ref: ProjectReference) -> Bool {
         state.withLock { $0[ref.url.standardizedFileURL] != nil }
     }
@@ -80,6 +92,8 @@ public final class AutosaveDebouncer: Sendable {
     /// Writes every pending project now, synchronously. Returns the number written.
     @discardableResult
     public func flush() -> Int {
+        writeLock.lock()
+        defer { writeLock.unlock() }
         let all = state.withLock { s -> [(URL, Pending)] in
             let items = Array(s)
             s.removeAll()
@@ -93,6 +107,8 @@ public final class AutosaveDebouncer: Sendable {
     }
 
     private func fire(key: URL, ref: ProjectReference, generation: Int) {
+        writeLock.lock()
+        defer { writeLock.unlock() }
         // Only the newest scheduled save may write; a flush or newer call may already have taken it.
         let taken = state.withLock { s -> Pending? in
             guard let p = s[key], p.generation == generation else { return nil }

@@ -324,6 +324,44 @@ func settle(_ check: () -> Bool) async {
         #expect(try await store.load(ref).name == "explicit")
     }
 
+    @Test func explicitSaveDuringInFlightAutosaveWriteLandsLast() async throws {
+        let clock = ManualClock()
+        let log = WriteLog()
+        let entered = OSAllocatedUnfairLock(initialState: false)
+        let gate = DispatchSemaphore(value: 0)
+        let d = AutosaveDebouncer(delay: 1, clock: clock) { p, r in
+            entered.withLock { $0 = true }
+            gate.wait()  // hold the autosave write "in flight"
+            log.add(p, r)
+        }
+        let ref = ProjectReference(url: URL(fileURLWithPath: "/tmp/a.nssproj"))
+        d.schedule(sampleProject(name: "P1"), to: ref)
+        await clock.waitForSleepers(1)
+        clock.advance(by: 1)
+        await settle { entered.withLock { $0 } }
+        // Explicit save arrives while P1 is being written: it must wait, then win.
+        let explicit = Task.detached { d.exclusive(ref) { log.add(sampleProject(name: "P2"), ref) } }
+        for _ in 0..<200 { await Task.yield() }
+        #expect(log.names.isEmpty)
+        gate.signal()
+        await explicit.value
+        #expect(log.names == ["P1", "P2"])
+        #expect(!d.hasPending(for: ref))
+    }
+
+    @Test func explicitSaveBeatsAutosaveThatHasNotTakenItsEntryYet() async throws {
+        let clock = ManualClock()
+        let log = WriteLog()
+        let d = AutosaveDebouncer(delay: 1, clock: clock) { p, r in log.add(p, r) }
+        let ref = ProjectReference(url: URL(fileURLWithPath: "/tmp/a.nssproj"))
+        d.schedule(sampleProject(name: "P1"), to: ref)
+        await clock.waitForSleepers(1)
+        d.exclusive(ref) { log.add(sampleProject(name: "P2"), ref) }
+        clock.advance(by: 1)
+        for _ in 0..<200 { await Task.yield() }
+        #expect(log.names == ["P2"])
+    }
+
     // MARK: Recents
 
     @Test func recentsListIsMruCappedAndPruned() {

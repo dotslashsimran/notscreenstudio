@@ -128,9 +128,9 @@ public actor FileProjectStore: ProjectStore {
     }
 
     public func save(_ project: Project, to ref: ProjectReference) async throws {
-        // An explicit save is newer than anything scheduled before it.
-        debouncer.cancel(ref)
-        try Self.writeProject(project, to: ref)
+        // An explicit save is newer than anything scheduled before it. `exclusive` waits for an in-flight
+        // autosave write, drops the pending one, and makes this the last write for the bundle.
+        try debouncer.exclusive(ref) { try Self.writeProject(project, to: ref) }
         touchRecent(ref, name: project.name)
     }
 
