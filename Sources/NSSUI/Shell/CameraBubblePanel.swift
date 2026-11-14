@@ -35,6 +35,7 @@ final class CameraPreviewSession: @unchecked Sendable {
 final class CameraBubbleView: NSView {
     let previewLayer: AVCaptureVideoPreviewLayer
     var shape: CameraShape = .circle { didSet { needsLayout = true } }
+    var roundness: Double = CameraBubble().roundness { didSet { needsLayout = true } }
 
     init(session: AVCaptureSession) {
         previewLayer = AVCaptureVideoPreviewLayer(session: session)
@@ -62,7 +63,7 @@ final class CameraBubbleView: NSView {
     override func layout() {
         super.layout()
         previewLayer.frame = bounds
-        layer?.cornerRadius = BubbleGeometry.cornerRadius(for: shape, size: bounds.size)
+        layer?.cornerRadius = BubbleGeometry.cornerRadius(for: shape, roundness: roundness, size: bounds.size)
         layer?.cornerCurve = .circular
     }
 
@@ -105,11 +106,13 @@ final class CameraBubblePanel: NSPanel {
     private let bubbleView: CameraBubbleView
     private let handle = ResizeHandle()
     private var shape: CameraShape
+    private var roundness: Double
     private var sourceWidth: CGFloat
 
     @MainActor
-    init(deviceID: String?, shape: CameraShape, frame: CGRect, sourceRect: CGRect) {
+    init(deviceID: String?, shape: CameraShape, roundness: Double, frame: CGRect, sourceRect: CGRect) {
         self.shape = shape
+        self.roundness = roundness
         self.sourceWidth = sourceRect.width
         self.bubbleView = CameraBubbleView(session: preview.session)
         super.init(contentRect: frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
@@ -120,6 +123,7 @@ final class CameraBubblePanel: NSPanel {
         isMovableByWindowBackground = true
         hidesOnDeactivate = false
         isReleasedWhenClosed = false
+        excludeFromCapture()
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
 
         let root = NSView(frame: CGRect(origin: .zero, size: frame.size))
@@ -127,6 +131,7 @@ final class CameraBubblePanel: NSPanel {
         bubbleView.frame = root.bounds
         bubbleView.autoresizingMask = [.width, .height]
         bubbleView.shape = shape
+        bubbleView.roundness = roundness
         root.addSubview(bubbleView)
         handle.frame = CGRect(x: root.bounds.maxX - 22, y: 0, width: 22, height: 22)
         handle.autoresizingMask = [.minXMargin, .maxYMargin]
@@ -152,9 +157,11 @@ final class CameraBubblePanel: NSPanel {
     func resize(byWidth delta: CGFloat) { resize(toWidth: frame.width + delta) }
 
     @MainActor
-    func apply(shape: CameraShape) {
+    func apply(shape: CameraShape, roundness: Double) {
         self.shape = shape
+        self.roundness = roundness
         bubbleView.shape = shape
+        bubbleView.roundness = roundness
         resize(toWidth: frame.width)
     }
 

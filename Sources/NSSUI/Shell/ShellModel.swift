@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import NSSCapture
 import Observation
 import NSSCore
 
@@ -49,6 +50,8 @@ public final class ShellModel {
     /// A non-fatal remark about the last start, for example "Camera skipped: permission denied".
     public private(set) var notice: String?
     public private(set) var lastSaved: SavedRecording?
+    /// True while the 3-2-1 countdown is on screen.
+    public private(set) var isCountingDown = false
     /// Newest project bundle in the library (from a previous run or the last recording), so the editor can reopen it.
     public private(set) var latestProject: ProjectReference?
     /// Increments each time the editor should open. Views watch it and call `openWindow`.
@@ -124,7 +127,16 @@ public final class ShellModel {
     public func selectCamera(_ id: String?) { updateSettings { $0.cameraDeviceID = id } }
     public func selectShape(_ shape: CameraShape) {
         updateSettings { $0.cameraShape = shape }
-        effects.updateBubbleShape(shape)
+        effects.updateBubble(shape: shape, roundness: settings.bubbleRoundness)
+    }
+    public func selectRoundness(_ roundness: Double) {
+        updateSettings { $0.bubbleRoundness = min(max(roundness, 0), 1) }
+        effects.updateBubble(shape: settings.cameraShape, roundness: settings.bubbleRoundness)
+    }
+    /// 0 (off), 3 or 5 seconds. Other values are ignored.
+    public func setCountdown(_ seconds: Int) {
+        guard ShellSettings.countdownChoices.contains(seconds) else { return }
+        updateSettings { $0.countdownSeconds = seconds }
     }
 
     /// Lets the user drag a rectangle on screen, then remembers it as the source.
@@ -225,23 +237,102 @@ public final class ShellModel {
             // The logger starts first so no early movement is lost. `stop` rebases to the session's origin.
             try await services.inputLogger.start(source: source)
             loggerStarted = true
-            let options = RecordingOptions(source: source, micDeviceID: micID, cameraDeviceID: camID)
-            try await services.session.start(options: options, into: ref.url)
-
-            let startedAt = now()
+            let seconds = settings.countdownSeconds
+            let options = RecordingOptions(source: source, micDeviceID: micID, cameraDeviceID: camID, countdownSeconds: seconds)
             let sourceRect = SourceLocator.appKitRect(
                 for: source, displays: listing.displays, windows: listing.windows, primaryHeight: effects.primaryScreenHeight)
             active = ActiveRecording(reference: ref, source: source, sourceRect: sourceRect, cameraDeviceID: camID, name: name)
+            // The camera bubble is shown before capture is prepared, so the capture filter is built with every
+            // window of this app already on screen (and the user can see themselves during the countdown).
+            try await begin(options: options, into: ref.url, countdown: seconds, over: sourceRect)
+
+            let startedAt = now()
             apply(.started(startedAt))
             showOverlays(startedAt: startedAt)
             watchSession()
+            // The HUD now exists too: make sure the running stream excludes it (and anything else that appeared).
+            if let warm = services.session as? any WarmableRecordingSession { Task { await warm.refreshExclusions() } }
         } catch {
+            effects.cancelCountdown()
+            isCountingDown = false
+            effects.hideBubble()
             if loggerStarted { _ = await services.inputLogger.stop(recordingStartHostTime: 0) }
             if let createdRef { Self.removeBundle(createdRef, library: services.store.libraryURL) }
             active = nil
-            apply(.startFailed(Self.describe(error)))
-            if case NSSError.permissionDenied = error { requestOnboarding() }
+            if error is StartCancelled {
+                apply(.startCancelled)
+            } else {
+                apply(.startFailed(Self.describe(error)))
+                if case NSSError.permissionDenied = error { requestOnboarding() }
+            }
         }
+    }
+
+    private struct StartCancelled: Error {}
+    private final class FatalBox { var error: NSSError? }
+
+    /// Counts down (if enabled) while the capture warms up, then starts recording at the end of the countdown.
+    /// Sessions that cannot warm up simply start after the countdown. Throws `StartCancelled` if the user cancels.
+    private func begin(options: RecordingOptions, into url: URL, countdown seconds: Int, over sourceRect: CGRect?) async throws {
+        let area = sourceRect ?? CGRect(x: 0, y: 0, width: 1440, height: 900)
+        guard let warm = services.session as? any WarmableRecordingSession else {
+            // The bubble is shown before capture is prepared, so the capture filter is built with every
+            // window of this app already on screen (and the user can see themselves during the countdown).
+            showBubbleOverlay()
+            if seconds > 0 {
+                isCountingDown = true
+                let done = await effects.runCountdown(seconds: seconds, over: area)
+                isCountingDown = false
+                if !done { throw StartCancelled() }
+            }
+            try await services.session.start(options: options, into: url)
+            return
+        }
+        // Permissions first: no bubble or countdown appears for a recording that cannot start.
+        try await warm.preflight(options: options)
+        showBubbleOverlay()
+        // A screen stream that dies during the countdown cuts it short and its real error is reported.
+        let fatal = FatalBox()
+        let events = warm.captureEvents
+        let effects0 = self.effects
+        let watcher = Task { @MainActor in
+            for await e in events where e.isFatal {
+                fatal.error = e.error
+                effects0.cancelCountdown()
+                return
+            }
+        }
+        defer { watcher.cancel() }
+        // Warm-up runs during the countdown. If it fails the countdown is cut short and the error is reported.
+        let effects = self.effects
+        let warmUp = Task { @MainActor () -> Error? in
+            do { try await warm.prepare(options: options, into: url); return nil } catch {
+                effects.cancelCountdown()
+                return error
+            }
+        }
+        var completed = true
+        if seconds > 0 {
+            isCountingDown = true
+            completed = await effects.runCountdown(seconds: seconds, over: area)
+            isCountingDown = false
+        }
+        if let failure = await warmUp.value { throw failure }
+        if let error = fatal.error {
+            await warm.cancelPrepared()
+            throw error
+        }
+        if !completed {
+            await warm.cancelPrepared()
+            throw StartCancelled()
+        }
+        try await warm.beginRecording()
+    }
+
+    /// Cancels the countdown. The recording never starts and nothing is saved.
+    public func cancelCountdown() {
+        guard isCountingDown else { return }
+        effects.cancelCountdown()
     }
 
     public func stopRecording() async {
@@ -288,7 +379,7 @@ public final class ShellModel {
         let placed = BubbleGeometry.toOutputSpace(
             center: geometry.0, size: geometry.1,
             outputAspect: style.aspectRatio.ratio, sourceAspect: assets.sourcePixelSize.aspect, padding: style.padding)
-        style.camera = Self.cameraBubble(hasCamera: assets.cameraFile != nil, shape: settings.cameraShape, geometry: placed)
+        style.camera = Self.cameraBubble(hasCamera: assets.cameraFile != nil, shape: settings.cameraShape, roundness: settings.bubbleRoundness, geometry: placed)
         let project = Project(name: active.name, assets: assets, style: style)
         try await services.store.saveCursorTrack(track, for: active.reference, assets: assets)
         try await services.store.save(project, to: active.reference)
@@ -331,12 +422,16 @@ public final class ShellModel {
             onStop: { [weak self] in Task { await self?.stopRecording() } },
             onDiscard: { [weak self] in Task { await self?.discardRecording() } })
         effects.registerStopShortcut { [weak self] in Task { await self?.stopRecording() } }
-        if let active, let camID = active.cameraDeviceID {
-            let source = active.sourceRect ?? CGRect(x: 0, y: 0, width: 1440, height: 900)
-            let frame = BubbleGeometry.panelFrame(
-                center: settings.bubbleCenter, size: settings.bubbleSize, shape: settings.cameraShape, in: source)
-            effects.showBubble(deviceID: camID, shape: settings.cameraShape, frame: frame, sourceRect: source)
-        }
+    }
+
+    /// Shows the live camera bubble with the same shape and roundness the editor and export will use.
+    private func showBubbleOverlay() {
+        guard let active, let camID = active.cameraDeviceID else { return }
+        let source = active.sourceRect ?? CGRect(x: 0, y: 0, width: 1440, height: 900)
+        let frame = BubbleGeometry.panelFrame(
+            center: settings.bubbleCenter, size: settings.bubbleSize, shape: settings.cameraShape, in: source)
+        effects.showBubble(
+            deviceID: camID, shape: settings.cameraShape, roundness: settings.bubbleRoundness, frame: frame, sourceRect: source)
     }
 
     private func hideOverlays() {
@@ -417,9 +512,10 @@ public final class ShellModel {
     }
 
     static func cameraBubble(
-        hasCamera: Bool, shape: CameraShape, geometry: (center: NormalizedPoint, size: Double)
+        hasCamera: Bool, shape: CameraShape, roundness: Double = CameraBubble().roundness,
+        geometry: (center: NormalizedPoint, size: Double)
     ) -> CameraBubble {
-        CameraBubble(visible: hasCamera, shape: shape, position: geometry.center, size: geometry.size)
+        CameraBubble(visible: hasCamera, shape: shape, position: geometry.center, size: geometry.size, roundness: roundness)
     }
 
     static func projectName(for date: Date) -> String {

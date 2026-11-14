@@ -125,14 +125,18 @@ public protocol ShellEffects: AnyObject {
     func showHUD(startedAt: Date, onStop: @escaping @MainActor () -> Void, onDiscard: @escaping @MainActor () -> Void)
     func hideHUD()
     /// Show the live camera bubble over the source. `frame` is in AppKit screen coordinates.
-    func showBubble(deviceID: String?, shape: CameraShape, frame: CGRect, sourceRect: CGRect)
+    func showBubble(deviceID: String?, shape: CameraShape, roundness: Double, frame: CGRect, sourceRect: CGRect)
     /// Current bubble frame in AppKit screen coordinates, nil if no bubble is shown.
     func bubbleFrame() -> CGRect?
-    func updateBubbleShape(_ shape: CameraShape)
+    func updateBubble(shape: CameraShape, roundness: Double)
     func hideBubble()
     /// Global shortcut that stops the recording. Registers `handler`, replacing any previous one.
     func registerStopShortcut(_ handler: @escaping @MainActor () -> Void)
     func unregisterStopShortcut()
+    /// Shows a large `seconds … 1` countdown centred on `rect` (AppKit coordinates), one second per number.
+    /// Returns true when it ran to the end, false when the user cancelled (Esc or a click) or `cancelCountdown()` was called.
+    func runCountdown(seconds: Int, over rect: CGRect) async -> Bool
+    func cancelCountdown()
     /// Full-screen overlay where the user drags a rectangle. nil if cancelled.
     func selectArea() async -> AreaSelection?
     /// Height of the primary display in points, for coordinate flips.

@@ -99,6 +99,7 @@ final class AreaSelectionOverlay {
                 window.level = .screenSaver
                 window.hasShadow = false
                 window.isReleasedWhenClosed = false
+                window.excludeFromCapture()
                 window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
                 let view = AreaSelectionView(frame: CGRect(origin: .zero, size: screen.frame.size), displayID: number.uint32Value)
                 view.onFinish = { [weak self] result in self?.finish(result) }

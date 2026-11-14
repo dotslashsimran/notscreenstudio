@@ -7,6 +7,7 @@ public final class AppKitShellEffects: ShellEffects {
     private let hud = RecordingHUDPanel()
     private let hotKey = GlobalHotKey()
     private let overlay = AreaSelectionOverlay()
+    private let countdown = CountdownOverlay()
     private var bubble: CameraBubblePanel?
 
     public init() {}
@@ -19,18 +20,18 @@ public final class AppKitShellEffects: ShellEffects {
 
     public func hideHUD() { hud.hide() }
 
-    public func showBubble(deviceID: String?, shape: CameraShape, frame: CGRect, sourceRect: CGRect) {
+    public func showBubble(deviceID: String?, shape: CameraShape, roundness: Double, frame: CGRect, sourceRect: CGRect) {
         hideBubble()
         let screens = NSScreen.screens.map(\.frame)
         let union = screens.dropFirst().reduce(screens.first ?? sourceRect) { $0.union($1) }
         let placed = BubbleGeometry.keepReachable(frame, in: union)
-        let panel = CameraBubblePanel(deviceID: deviceID, shape: shape, frame: placed, sourceRect: sourceRect)
+        let panel = CameraBubblePanel(deviceID: deviceID, shape: shape, roundness: roundness, frame: placed, sourceRect: sourceRect)
         panel.orderFrontRegardless()
         bubble = panel
     }
 
     public func bubbleFrame() -> CGRect? { bubble?.frame }
-    public func updateBubbleShape(_ shape: CameraShape) { bubble?.apply(shape: shape) }
+    public func updateBubble(shape: CameraShape, roundness: Double) { bubble?.apply(shape: shape, roundness: roundness) }
 
     public func hideBubble() {
         bubble?.close(stopping: true)
@@ -42,6 +43,12 @@ public final class AppKitShellEffects: ShellEffects {
     }
 
     public func unregisterStopShortcut() { hotKey.unregister() }
+
+    public func runCountdown(seconds: Int, over rect: CGRect) async -> Bool {
+        await countdown.run(seconds: seconds, over: rect)
+    }
+
+    public func cancelCountdown() { countdown.cancel() }
 
     public func selectArea() async -> AreaSelection? { await overlay.run() }
 }

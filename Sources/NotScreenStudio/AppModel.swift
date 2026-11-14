@@ -15,7 +15,11 @@ import Observation
 @Observable
 final class AppModel {
     // Swap implementations here. Each line is the only place its module is named.
-    @ObservationIgnored let recordingSession: any RecordingSession = ScreenCaptureRecordingSession()
+    /// The capture excludes this whole app by process. The window numbers are a fallback for windows whose owner
+    /// ScreenCaptureKit does not report.
+    @ObservationIgnored let recordingSession: any RecordingSession = ScreenCaptureRecordingSession(ownWindowIDs: {
+        await MainActor.run { NSApp.windows.map { $0.windowNumber }.filter { $0 > 0 }.map { UInt32($0) } }
+    })
     @ObservationIgnored let inputLogger: any InputLogger = SystemInputLogger()
     @ObservationIgnored let projectStore: any ProjectStore
     @ObservationIgnored let motionFactory: MotionModelFactory = SpringMotionModel.factory

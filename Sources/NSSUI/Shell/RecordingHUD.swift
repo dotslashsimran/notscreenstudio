@@ -50,6 +50,7 @@ final class RecordingHUDPanel {
         panel.isMovableByWindowBackground = true
         panel.hidesOnDeactivate = false
         panel.isReleasedWhenClosed = false
+        panel.excludeFromCapture()
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
         if let screen = NSScreen.main ?? NSScreen.screens.first {
             let vf = screen.visibleFrame

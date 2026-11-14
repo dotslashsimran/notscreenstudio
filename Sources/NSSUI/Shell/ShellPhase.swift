@@ -28,6 +28,8 @@ public enum ShellEvent: Equatable, Sendable {
     case startRequested
     case started(Date)
     case startFailed(String)
+    /// The user cancelled during the countdown. Not an error.
+    case startCancelled
     case stopRequested
     case discardRequested
     case saved(ProjectReference)
@@ -47,6 +49,8 @@ public enum ShellStateMachine {
             return .recording(startedAt: date)
         case (.preparing, .startFailed(let message)):
             return .failed(message)
+        case (.preparing, .startCancelled):
+            return .idle
         case (.recording, .stopRequested):
             return .saving
         case (.recording, .discardRequested):
