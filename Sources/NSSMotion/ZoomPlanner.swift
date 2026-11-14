@@ -56,47 +56,91 @@ public enum ZoomPlanner {
 
     // MARK: Auto
 
+    /// A mouse-down and the time its button was released (== `t` when no matching mouse-up).
+    struct Press {
+        var down: ClickEvent
+        var release: MediaTime
+    }
+
+    /// Pairs each mouse-down with the next mouse-up of the same button, so drags count as one press.
+    static func presses(_ clicks: [ClickEvent], duration: MediaTime) -> [Press] {
+        let events = clicks
+            .filter { $0.t.isFinite && $0.t >= 0 && $0.t <= duration }
+            .enumerated()
+            .sorted { $0.element.t != $1.element.t ? $0.element.t < $1.element.t : $0.offset < $1.offset }
+            .map(\.element)
+        var out: [Press] = []
+        var open: [MouseButton: Int] = [:]
+        for e in events {
+            switch e.kind {
+            case .down:
+                open[e.button] = out.count
+                out.append(Press(down: e, release: e.t))
+            case .up:
+                if let i = open.removeValue(forKey: e.button) { out[i].release = e.t }
+            }
+        }
+        return out
+    }
+
     static func autoSegments(track: CursorTrack, duration: MediaTime, sourceAspect: Double, tuning: MotionTuning) -> [ZoomSegment] {
-        let downs = track.clicks
-            .filter { $0.kind == .down && $0.t.isFinite && $0.t >= 0 && $0.t <= duration }
-            .sorted { $0.t < $1.t }
-        guard !downs.isEmpty else { return [] }
+        let presses = presses(track.clicks, duration: duration)
+        guard !presses.isEmpty else { return [] }
         let aspect = sourceAspect.isFinite && sourceAspect > 0 ? sourceAspect : 16.0 / 9.0
 
-        // 1. Cluster clicks in time and space.
-        var clusters: [[ClickEvent]] = []
-        for c in downs {
-            if let last = clusters.last?.last {
-                let dt = c.t - last.t
-                let dx = (c.x - last.x) * aspect, dy = c.y - last.y
-                let dist = (dx * dx + dy * dy).squareRoot()
-                let joins = dt <= tuning.clusterMaxGap && (dist <= tuning.clusterMaxDistance || dt <= tuning.clusterPanGap)
-                if joins {
-                    clusters[clusters.count - 1].append(c)
+        // 1. Cluster presses in time (gap measured from the previous release) and space.
+        struct Cluster {
+            var first: ClickEvent
+            var last: ClickEvent
+            var release: MediaTime
+            /// The next cluster starts because of distance, not time.
+            var spatialBreakAfter = false
+        }
+        var clusters: [Cluster] = []
+        for p in presses {
+            let c = p.down
+            if var cur = clusters.last {
+                let dt = c.t - cur.release
+                let dx = (c.x - cur.last.x) * aspect, dy = c.y - cur.last.y
+                let near = (dx * dx + dy * dy).squareRoot() <= tuning.clusterMaxDistance
+                if dt <= tuning.clusterMaxGap && (near || dt <= tuning.clusterPanGap) {
+                    cur.last = c
+                    cur.release = max(cur.release, p.release)
+                    clusters[clusters.count - 1] = cur
                     continue
                 }
+                if dt <= tuning.clusterMaxGap {
+                    clusters[clusters.count - 1].spatialBreakAfter = true
+                }
             }
-            clusters.append([c])
+            clusters.append(Cluster(first: c, last: c, release: p.release))
         }
 
-        // 2. Each cluster -> interval: lead-in before the first click, hold while activity continues.
-        var segs: [ZoomSegment] = []
-        for cluster in clusters {
-            let first = cluster[0], last = cluster[cluster.count - 1]
-            let end = holdEnd(after: last.t, track: track, tuning: tuning)
-            segs.append(ZoomSegment(
-                start: first.t - tuning.autoZoomLeadIn,
-                end: end,
+        // 2. Each cluster -> interval: lead-in before the first click, hold after the last release
+        //    while the cursor keeps moving.
+        var segs: [(seg: ZoomSegment, release: MediaTime, spatialBreakAfter: Bool)] = clusters.map { cl in
+            (ZoomSegment(
+                start: cl.first.t - tuning.autoZoomLeadIn,
+                end: holdEnd(after: cl.release, track: track, tuning: tuning),
                 scale: clampScale(tuning.autoZoomScale, tuning),
-                initialFocus: first.point.clamped,
-                followFrom: first.t,
+                initialFocus: cl.first.point.clamped,
+                followFrom: cl.first.t,
                 origin: .auto
-            ))
+            ), cl.release, cl.spatialBreakAfter)
         }
 
-        // 3. Merge segments whose gap is too short to zoom out and back in.
+        // 3. Spatial splits: shorten the earlier hold to leave room to zoom out and back in. If there
+        //    is no room, the segments merge below and the camera pans instead.
+        for i in segs.indices.dropLast() where segs[i].spatialBreakAfter {
+            let latest = segs[i + 1].seg.start - tuning.minZoomOutGap
+            if latest >= segs[i].release + tuning.autoZoomMinHold {
+                segs[i].seg.end = min(segs[i].seg.end, latest)
+            }
+        }
+
+        // 4. Merge segments whose gap is too short to zoom out and back in.
         var merged: [ZoomSegment] = []
-        for s in segs {
+        for (s, _, _) in segs {
             if var prev = merged.last, s.start - prev.end < tuning.minZoomOutGap {
                 prev.end = max(prev.end, s.end)
                 merged[merged.count - 1] = prev
@@ -105,7 +149,7 @@ public enum ZoomPlanner {
             }
         }
 
-        // 4. Clamp to the recording.
+        // 5. Clamp to the recording.
         return merged.compactMap { s in
             var s = s
             s.start = max(0, s.start)
@@ -114,7 +158,7 @@ public enum ZoomPlanner {
         }
     }
 
-    /// End of the hold after the last click at `t0`: `autoZoomHold` after the cursor last moved,
+    /// End of the hold after the last release at `t0`: `autoZoomHold` after the cursor last moved,
     /// capped at `t0 + autoZoomMaxHold`.
     static func holdEnd(after t0: MediaTime, track: CursorTrack, tuning: MotionTuning) -> MediaTime {
         let cap = t0 + max(tuning.autoZoomMaxHold, tuning.autoZoomHold)
@@ -146,18 +190,23 @@ public enum ZoomPlanner {
             let start = max(0, b.start)
             let end = duration > 0 ? min(b.end, duration) : b.end
             guard end > start else { continue }
-            // A later-starting block takes over where blocks overlap.
-            if var prev = segs.last, prev.end > start {
-                prev.end = start
-                if prev.end > prev.start { segs[segs.count - 1] = prev } else { segs.removeLast() }
-            }
+            let seg: ZoomSegment
             switch b.focus {
             case .manual(let p):
-                segs.append(ZoomSegment(start: start, end: end, scale: clampScale(b.scale, tuning), initialFocus: p.clamped, followFrom: nil, origin: .manual(b.id)))
+                seg = ZoomSegment(start: start, end: end, scale: clampScale(b.scale, tuning), initialFocus: p.clamped, followFrom: nil, origin: .manual(b.id))
             case .auto:
                 let p = track.rawPosition(at: start)?.clamped ?? .center
-                segs.append(ZoomSegment(start: start, end: end, scale: clampScale(b.scale, tuning), initialFocus: p, followFrom: start, origin: .manual(b.id)))
+                seg = ZoomSegment(start: start, end: end, scale: clampScale(b.scale, tuning), initialFocus: p, followFrom: start, origin: .manual(b.id))
             }
+            // A later-starting block takes over only where it overlaps: earlier blocks keep the
+            // parts before and after it (e.g. a short block nested inside a long one).
+            var next: [ZoomSegment] = []
+            for prev in segs {
+                next.append(contentsOf: cut(prev, from: seg.start, to: seg.end, track: track).filter { $0.end > $0.start })
+            }
+            next.append(seg)
+            next.sort { $0.start < $1.start }
+            segs = next
         }
         return segs
     }
@@ -166,26 +215,30 @@ public enum ZoomPlanner {
     static func subtract(_ manual: [ZoomSegment], from seg: ZoomSegment, track: CursorTrack, tuning: MotionTuning) -> [ZoomSegment] {
         var pieces = [seg]
         for m in manual where m.end > seg.start && m.start < seg.end {
-            var next: [ZoomSegment] = []
-            for p in pieces {
-                if m.end <= p.start || m.start >= p.end { next.append(p); continue }
-                if m.start > p.start {
-                    var a = p
-                    a.end = m.start
-                    next.append(a)
-                }
-                if m.end < p.end {
-                    var b = p
-                    b.start = m.end
-                    if let f = b.followFrom, b.start > f {
-                        b.initialFocus = track.rawPosition(at: b.start)?.clamped ?? b.initialFocus
-                    }
-                    next.append(b)
-                }
-            }
-            pieces = next
+            pieces = pieces.flatMap { cut($0, from: m.start, to: m.end, track: track) }
         }
         return pieces.filter { $0.end - $0.start >= tuning.minSegmentDuration }
+    }
+
+    /// The parts of `seg` outside `[start, end)`: up to one piece before and one after. A
+    /// cursor-following piece that resumes after the cut is re-anchored on the cursor there.
+    static func cut(_ seg: ZoomSegment, from start: MediaTime, to end: MediaTime, track: CursorTrack) -> [ZoomSegment] {
+        if end <= seg.start || start >= seg.end { return [seg] }
+        var out: [ZoomSegment] = []
+        if start > seg.start {
+            var a = seg
+            a.end = start
+            out.append(a)
+        }
+        if end < seg.end {
+            var b = seg
+            b.start = end
+            if let f = b.followFrom, b.start > f {
+                b.initialFocus = track.rawPosition(at: b.start)?.clamped ?? b.initialFocus
+            }
+            out.append(b)
+        }
+        return out
     }
 
     // MARK: Helpers

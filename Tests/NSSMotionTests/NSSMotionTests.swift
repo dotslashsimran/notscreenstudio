@@ -296,9 +296,10 @@ func model(
 
     @Test func trimStartIsSettled() {
         // A zoom segment spans the trim start: the camera must already be fully zoomed there.
-        let clicks = [click(4, 0.3, 0.3), click(5, 0.3, 0.3)]
+        let clicks = [click(4, 0.3, 0.3), click(4.3, 0.3, 0.3), click(5, 0.3, 0.3)]
         let m = model(samples: wander, clicks: clicks, timeline: Timeline(trim: TrimRange(start: 4.5, end: 15)))
         let s = m.frameState(at: 4.5)
+        #expect(s.cursor.ripples.count == 1) // the 4.3 s click, still rippling at the trim start
         #expect(abs(s.camera.scale - 2) < 1e-6)
         // the cursor is settled on the raw position at the trim start
         let raw = CursorTrack(samples: wander).rawPosition(at: 4.5)!
@@ -307,6 +308,102 @@ func model(
         var before = m.frameState(at: 1)
         before.time = 4.5
         #expect(before == s)
+    }
+
+    @Test func nestedManualBlockKeepsOuterRemainder() {
+        let a = UUID(), b = UUID()
+        let outer = ZoomBlock(id: a, start: 0, end: 10, scale: 2, focus: .manual(NormalizedPoint(x: 0.3, y: 0.3)))
+        let inner = ZoomBlock(id: b, start: 2, end: 3, scale: 3, focus: .manual(NormalizedPoint(x: 0.6, y: 0.6)))
+        let m = model(clicks: [click(6, 0.9, 0.9)], timeline: Timeline(zoomBlocks: [inner, outer]))
+        let segs = m.zoomSegments
+        #expect(segs.map(\.origin) == [.manual(a), .manual(b), .manual(a)])
+        #expect(segs.map(\.start) == [0, 2, 3])
+        #expect(segs.map(\.end) == [2, 3, 10])
+        // A still owns 3...10 s: zoomed at 2x on its focus, and the auto-zoom click at 6 s is ignored.
+        let c = m.frameState(at: 8).camera
+        #expect(abs(c.scale - 2) < 0.01)
+        #expect(abs(c.center.x - 0.3) < 0.01 && abs(c.center.y - 0.3) < 0.01)
+
+        // Follow-mode remainders are re-anchored on the cursor where they resume.
+        let samples = makeSamples(duration: 10) { t in NormalizedPoint(x: t < 3 ? 0.2 : 0.7, y: 0.5) }
+        let follow = ZoomBlock(id: a, start: 0, end: 10, scale: 2, focus: .auto)
+        let m2 = model(samples: samples, timeline: Timeline(zoomBlocks: [follow, inner], autoZoomEnabled: false), duration: 10)
+        #expect(m2.zoomSegments.count == 3)
+        #expect(abs(m2.zoomSegments[2].initialFocus.x - 0.7) < 1e-9)
+        #expect(m2.zoomSegments[2].followFrom == 0)
+    }
+
+    @Test func hugeFiniteDurationsAndTimestampsAreBounded() {
+        var tuning = MotionTuning()
+        tuning.maxSimulationFrames = 10_000 // keep the debug test fast; same code path as the default cap
+        let huge = model(clicks: [click(5, 0.3, 0.3)], duration: 1e15, tuning: tuning)
+        #expect(huge.simulatedFrameCount <= 10_000)
+        #expect(huge.endTime == tuning.maxDuration)
+        _ = huge.frameState(at: 1e15)
+        _ = huge.frameState(at: 6)
+
+        // Absolute timestamps (seconds since 1970) by mistake, with the duration derived from them.
+        let absolute = SpringMotionModel(
+            track: CursorTrack(samples: [CursorSample(t: 1.7e9, x: 0.5, y: 0.5)], clicks: [click(1.7e9 + 1, 0.4, 0.4)]),
+            timeline: Timeline(), cursorStyle: CursorStyle(), duration: 0, tuning: tuning
+        )
+        #expect(absolute.simulatedFrameCount <= 10_000)
+        #expect(absolute.frameState(at: 1.7e9).camera.scale >= 1)
+
+        let absurd = model(clicks: [click(1e300, 0.4, 0.4)], timeline: Timeline(trim: TrimRange(start: 1e300, end: .greatestFiniteMagnitude)), duration: .greatestFiniteMagnitude, tuning: tuning)
+        #expect(absurd.simulatedFrameCount <= 10_000)
+
+        // Default cap: the table stays at or below maxSimulationFrames (about 32 MB).
+        #expect(MotionTuning.standard.maxSimulationFrames * MemoryLayout<SpringMotionModel.SimFrame>.stride <= 32_000_000)
+    }
+
+    @Test func zoomOutDoesNotSwingTowardNextSegment() {
+        // Segment 1 focuses top-left, segment 2 (8 s later) bottom-right.
+        let m = model(clicks: [click(2, 0.2, 0.2), click(10, 0.8, 0.8)])
+        #expect(m.zoomSegments.count == 2)
+        let end1 = m.zoomSegments[0].end
+        for t in stride(from: end1, to: m.zoomSegments[1].start, by: 1.0 / 120) {
+            let c = m.frameState(at: t).camera
+            guard c.scale > 1.05 else { continue }
+            // While zooming out the focus stays at 0.2, so the center sits on the low clamp edge.
+            #expect(c.center.x <= max(0.2, 0.5 / c.scale) + 1e-4)
+            #expect(c.center.y <= max(0.2, 0.5 / c.scale) + 1e-4)
+        }
+        // ... and the next zoom-in still lands on its target.
+        let c2 = m.frameState(at: 11).camera
+        #expect(abs(c2.center.x - 0.75) < 0.02) // 0.8 clamped to 1 - 0.5/2
+    }
+
+    @Test func dragHoldsZoomUntilRelease() {
+        let t = MotionTuning.standard
+        let clicks = [click(2, 0.3, 0.3), ClickEvent(t: 9, x: 0.35, y: 0.3, kind: .up)]
+        let m = model(clicks: clicks)
+        #expect(m.zoomSegments.count == 1)
+        #expect(abs(m.zoomSegments[0].end - (9 + t.autoZoomHold)) < 1e-9)
+        #expect(abs(m.frameState(at: 8).camera.scale - 2) < 0.01)
+
+        // A plain click (down + quick up) still eases out after the normal hold.
+        let quick = model(clicks: [click(2, 0.3, 0.3), ClickEvent(t: 2.1, x: 0.3, y: 0.3, kind: .up)])
+        #expect(abs(quick.zoomSegments[0].end - (2.1 + t.autoZoomHold)) < 1e-9)
+
+        // Mismatched buttons do not pair.
+        let other = model(clicks: [click(2, 0.3, 0.3), ClickEvent(t: 9, x: 0.3, y: 0.3, button: .right, kind: .up)])
+        #expect(abs(other.zoomSegments[0].end - (2 + t.autoZoomHold)) < 1e-9)
+    }
+
+    @Test func spatialSplitIsEffectiveWithStandardTuning() {
+        let t = MotionTuning.standard
+        // Far apart, 2.5 s apart: zoom out between them and back in on the new spot.
+        let far = model(clicks: [click(2, 0.1, 0.1), click(4.5, 0.9, 0.9)])
+        #expect(far.zoomSegments.count == 2)
+        #expect(far.zoomSegments[1].start - far.zoomSegments[0].end >= t.minZoomOutGap - 1e-9)
+        #expect(far.zoomSegments[0].end >= 2 + t.autoZoomMinHold - 1e-9)
+        // Same timing, nearby: one held segment.
+        #expect(model(clicks: [click(2, 0.3, 0.3), click(4.5, 0.35, 0.3)]).zoomSegments.count == 1)
+        // Far apart but only 1.5 s apart: not enough room to zoom out, so it pans in one segment.
+        #expect(model(clicks: [click(2, 0.1, 0.1), click(3.5, 0.9, 0.9)]).zoomSegments.count == 1)
+        // Far apart and within clusterPanGap: one segment.
+        #expect(model(clicks: [click(2, 0.1, 0.1), click(2.8, 0.9, 0.9)]).zoomSegments.count == 1)
     }
 
     @Test func degenerateInputsDoNotCrash() {

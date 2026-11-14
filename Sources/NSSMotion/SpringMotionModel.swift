@@ -60,9 +60,16 @@ public struct SpringMotionModel: MotionModel {
         if duration <= 0 {
             duration = max(track.samples.last?.t ?? 0, track.clicks.map(\.t).filter(\.isFinite).max() ?? 0)
         }
+        // Bound the simulated range: a bogus duration or absolute timestamps must not trap or
+        // allocate without limit.
+        let maxDuration = tuning.maxDuration.isFinite && tuning.maxDuration > 0 ? tuning.maxDuration : 24 * 60 * 60
+        duration = min(max(duration, 0), maxDuration)
+        let trimEnd = timeline.trim.resolvedEnd(duration: duration)
         let start = min(max(0, timeline.trim.start.isFinite ? timeline.trim.start : 0), duration)
-        let end = max(start, timeline.trim.resolvedEnd(duration: duration))
-        let rate = tuning.simulationRate.isFinite && tuning.simulationRate > 0 ? tuning.simulationRate : 240
+        let end = max(start, trimEnd.isFinite ? trimEnd : duration)
+        var rate = tuning.simulationRate.isFinite && tuning.simulationRate > 0 ? tuning.simulationRate : 240
+        let maxSteps = Double(max(tuning.maxSimulationFrames, 2) - 1)
+        if (end - start) * rate > maxSteps { rate = maxSteps / (end - start) }
 
         self.tuning = tuning
         self.cursorStyle = cursorStyle
@@ -96,7 +103,7 @@ public struct SpringMotionModel: MotionModel {
     // MARK: Lookup
 
     public func frameState(at t: MediaTime) -> FrameState {
-        let tc = t.isFinite ? min(max(t, startTime), endTime) : startTime
+        let tc = clampedTime(t)
         let u = (tc - startTime) * rate
         var i = Int(u)
         if i >= frames.count - 1 { i = frames.count - 2 }
@@ -124,13 +131,21 @@ public struct SpringMotionModel: MotionModel {
             position: hasCursor ? position : .center,
             velocity: hasCursor ? velocity : .zero,
             visible: hasCursor && opacity > 0,
-            ripples: ripples(at: t),
+            ripples: ripples(at: tc),
             opacity: opacity
         )
         return FrameState(time: t, camera: camera, cursor: cursor)
     }
 
-    /// Ripples for every mouse-down in (t - rippleDuration, t].
+    /// `t` clamped to the simulated (trim) range, like every part of the frame state.
+    func clampedTime(_ t: MediaTime) -> MediaTime {
+        t.isFinite ? min(max(t, startTime), endTime) : startTime
+    }
+
+    /// Number of simulated frames (bounded by `MotionTuning.maxSimulationFrames`).
+    var simulatedFrameCount: Int { frames.count }
+
+    /// Ripples for every mouse-down in (t - rippleDuration, t]. `t` is already clamped.
     func ripples(at t: MediaTime) -> [RippleState] {
         guard cursorStyle.clickRipples, !rippleTimes.isEmpty, t.isFinite else { return [] }
         let d = max(tuning.rippleDuration, 1e-6)
@@ -162,7 +177,10 @@ public struct SpringMotionModel: MotionModel {
         tuning: MotionTuning
     ) -> [SimFrame] {
         let dt = 1 / rate
-        let steps = max(1, Int(((end - start) * rate).rounded(.up)))
+        // `rate` was already lowered so the span fits; min() again before Int() so it cannot trap.
+        let maxSteps = max(tuning.maxSimulationFrames, 2) - 1
+        let span = ((end - start) * rate).rounded(.up)
+        let steps = max(1, Int(min(span, Double(maxSteps))))
         var frames: [SimFrame] = []
         frames.reserveCapacity(steps + 1)
 
@@ -177,7 +195,7 @@ public struct SpringMotionModel: MotionModel {
 
         // Settled initial state at the trim start.
         let raw0 = cursor.position(at: start)
-        let target0 = planner.target(at: start, cursor: raw0)
+        let target0 = planner.target(at: start, cursor: raw0, currentScale: 1)
         var logScale = log(target0.scale), logScaleV = 0.0
         var fx = target0.focus.x, fxV = 0.0
         var fy = target0.focus.y, fyV = 0.0
@@ -203,7 +221,7 @@ public struct SpringMotionModel: MotionModel {
         for k in 1...steps {
             let t = start + Double(k) * dt
             let raw = cursor.position(at: t)
-            let target = planner.target(at: t, cursor: raw)
+            let target = planner.target(at: t, cursor: raw, currentScale: exp(logScale))
             zoomStep.step(&logScale, &logScaleV, target: log(target.scale))
             panStep.step(&fx, &fxV, target: target.focus.x)
             panStep.step(&fy, &fyV, target: target.focus.y)
@@ -263,7 +281,9 @@ struct CameraPlanner {
         return NormalizedPoint(x: min(max(p.x, h), 1 - h), y: min(max(p.y, h), 1 - h))
     }
 
-    mutating func target(at t: MediaTime, cursor: NormalizedPoint?) -> (scale: Double, focus: NormalizedPoint) {
+    /// - Parameter currentScale: the camera's current (spring) scale, used to delay re-aiming
+    ///   between segments until the zoom-out has finished.
+    mutating func target(at t: MediaTime, cursor: NormalizedPoint?, currentScale: Double) -> (scale: Double, focus: NormalizedPoint) {
         while index < segments.count, segments[index].end <= t { index += 1 }
         guard index < segments.count else {
             active = nil
@@ -271,10 +291,13 @@ struct CameraPlanner {
         }
         let seg = segments[index]
         guard seg.start <= t else {
-            // Between segments: zoomed out; quietly pre-aim the focus at the next segment so the
-            // zoom-in heads straight for it (invisible at scale 1, where the center is clamped).
+            // Between segments: zoom out around the current focus. Once (nearly) fully zoomed out,
+            // quietly pre-aim at the next segment so its zoom-in heads straight for it; this is
+            // invisible at scale ~1, where the center is clamped to the middle.
             active = nil
-            focus = Self.clampFocus(seg.initialFocus, scale: seg.scale)
+            if currentScale <= tuning.preAimMaxScale {
+                focus = Self.clampFocus(seg.initialFocus, scale: seg.scale)
+            }
             return (1, focus)
         }
         if active != index {
