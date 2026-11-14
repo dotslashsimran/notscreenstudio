@@ -42,7 +42,12 @@ public final class PreviewEngine {
     private var renderBusy = false
     private var dirty = true
     private var awaitingFrame = 0
-    private var motionGeneration = 0
+    private var motionBuilding = false
+    private var motionPending = false
+    /// Number of motion builds started (diagnostics / tests).
+    private(set) var motionBuildCount = 0
+    /// Last playhead the players were seeked to (paused playhead edits must match it).
+    private(set) var lastSeekTarget: MediaTime = 0
     private var tickCount = 0
     private var syncCheckCount = 0
     private var itemEnded = false
@@ -83,19 +88,27 @@ public final class PreviewEngine {
         return d.isFinite && d > 0 ? min(model.trimEnd, d - 0.02) : model.trimEnd
     }
 
-    public var frameSource: PlayerFrameSource { PlayerFrameSource(screen: screen, camera: camera) }
-
     // MARK: Model changes
 
     public func modelChanged(_ change: EditorChange) {
         if change == .timeline { rebuildMotion() }
+        // Trim edits and undo/redo can move or strand the playhead: keep the players on the same time.
+        let clamped = TrimEditing.clamp(model.playhead, to: model.trim, duration: model.duration)
+        if clamped != model.playhead { model.playhead = clamped }
+        if !model.isPlaying, abs(clamped - lastSeekTarget) > 1e-6 || clamped != model.playhead { seek(to: clamped) }
         dirty = true
     }
 
+    /// At most one build runs at a time; requests that arrive meanwhile collapse into one follow-up build
+    /// that reads the latest project state when it starts (stale builds are never started).
     private func rebuildMotion() {
-        motionGeneration += 1
-        let gen = motionGeneration
-        let factory = model.dependencies.motionFactory
+        if motionBuilding {
+            motionPending = true
+            return
+        }
+        motionBuilding = true
+        motionBuildCount += 1
+        let factory = model.motionFactoryForCurrentAspect
         let track = model.track
         let timeline = model.project.timeline
         let style = model.project.style.cursor
@@ -103,9 +116,14 @@ public final class PreviewEngine {
         let box = motion
         Task { @MainActor [weak self] in
             let built = await Task.detached(priority: .userInitiated) { factory(track, timeline, style, duration) }.value
-            guard let self, self.motionGeneration == gen else { return }
+            guard let self else { return }
             box.set(built)
             self.dirty = true
+            self.motionBuilding = false
+            if self.motionPending {
+                self.motionPending = false
+                self.rebuildMotion()
+            }
         }
     }
 
@@ -130,6 +148,7 @@ public final class PreviewEngine {
         for p in allPlayers { p.pause() }
         model.isPlaying = false
         model.playhead = clampedPlayerTime()
+        lastSeekTarget = model.playhead
         dirty = true
     }
 
@@ -138,6 +157,7 @@ public final class PreviewEngine {
         let cm = CMTime(seconds: t, preferredTimescale: 600)
         for p in allPlayers { p.seek(to: cm, toleranceBefore: .zero, toleranceAfter: .zero) }
         model.playhead = t
+        lastSeekTarget = t
         awaitingFrame = 30
         dirty = true
     }

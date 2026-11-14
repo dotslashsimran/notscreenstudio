@@ -39,7 +39,7 @@ struct ExportSheet: View {
                     Button("Done") { close() }.keyboardShortcut(.defaultAction)
                 } else {
                     Button("Close") { close() }.keyboardShortcut(.cancelAction)
-                    Button("Export") { export.start() }.keyboardShortcut(.defaultAction)
+                    Button("Export") { confirmAndStart() }.keyboardShortcut(.defaultAction)
                 }
             }
         }
@@ -59,6 +59,18 @@ struct ExportSheet: View {
         case .cancelled: Label("Export cancelled", systemImage: "xmark.circle").foregroundStyle(.secondary)
         case .idle: EmptyView()
         }
+    }
+
+    private func confirmAndStart() {
+        if FileManager.default.fileExists(atPath: export.outputURL.path) {
+            let alert = NSAlert()
+            alert.messageText = "Replace \"\(export.outputURL.lastPathComponent)\"?"
+            alert.informativeText = "A file with this name already exists in that folder. Replacing it overwrites its contents."
+            alert.addButton(withTitle: "Replace")
+            alert.addButton(withTitle: "Cancel")
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+        }
+        export.start()
     }
 
     private func choose() {

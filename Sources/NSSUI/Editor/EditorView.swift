@@ -13,7 +13,8 @@ extension EditorDependencies {
             store: FileProjectStore(),
             motionFactory: SpringMotionModel.factory,
             renderer: renderer,
-            exporter: StubExporter(motionFactory: SpringMotionModel.factory, renderer: renderer)
+            exporter: StubExporter(motionFactory: SpringMotionModel.factory, renderer: renderer),
+            motionFactoryForAspect: { SpringMotionModel.factory(sourceAspect: $0) }
         )
     }
 }
@@ -59,7 +60,7 @@ public struct EditorView: View {
     public var body: some View {
         Group {
             if let session {
-                EditorContent(session: session)
+                EditorContent(session: session).id(ObjectIdentifier(session))
             } else if let loadError {
                 ContentUnavailableView("Couldn't open project", systemImage: "exclamationmark.triangle", description: Text(loadError))
             } else if reference == nil {
@@ -78,6 +79,7 @@ public struct EditorView: View {
         do {
             let project = try await dependencies.store.load(reference)
             let track = try await dependencies.store.loadCursorTrack(for: reference, assets: project.assets)
+            session?.close()
             session = EditorSession(model: EditorModel(project: project, reference: reference, track: track, dependencies: dependencies))
         } catch {
             loadError = error.localizedDescription

@@ -17,7 +17,15 @@ public struct EditorDependencies: Sendable {
     public var renderer: any FrameRenderer
     public var exporter: any Exporter
 
-    public init(store: any ProjectStore, motionFactory: @escaping MotionModelFactory, renderer: any FrameRenderer, exporter: any Exporter) {
+    /// Optional: builds a factory for the real source aspect (width / height) of the recording. When set, the
+    /// preview uses it instead of `motionFactory`, so auto-zoom framing is right for non-16:9 sources.
+    public var motionFactoryForAspect: (@Sendable (_ sourceAspect: Double) -> MotionModelFactory)?
+
+    public init(
+        store: any ProjectStore, motionFactory: @escaping MotionModelFactory, renderer: any FrameRenderer, exporter: any Exporter,
+        motionFactoryForAspect: (@Sendable (_ sourceAspect: Double) -> MotionModelFactory)? = nil
+    ) {
+        self.motionFactoryForAspect = motionFactoryForAspect
         self.store = store
         self.motionFactory = motionFactory
         self.renderer = renderer
@@ -48,6 +56,10 @@ public final class EditorModel {
     @ObservationIgnored public var changeHandler: ((EditorChange) -> Void)?
     @ObservationIgnored private var gestureBase: Project?
     @ObservationIgnored private var gestureName = ""
+    @ObservationIgnored private var lastEdit: (key: String?, time: Date) = (nil, .distantPast)
+    /// Injectable for tests.
+    @ObservationIgnored var clock: () -> Date = { Date() }
+    static let coalescingWindow: TimeInterval = 0.6
 
     public init(project: Project, reference: ProjectReference, track: CursorTrack, dependencies: EditorDependencies) {
         self.project = project
@@ -71,11 +83,16 @@ public final class EditorModel {
 
     /// Applies `mutate` as one undoable step. Inside a gesture (`beginGesture`) the change is applied
     /// live and recorded as a single undo step when the gesture ends.
-    public func apply(_ name: String, _ mutate: (inout Project) -> Void) {
+    public func apply(_ name: String, coalescingKey: String? = nil, _ mutate: (inout Project) -> Void) {
         var next = project
         mutate(&next)
         guard next != project else { return }
+        let now = clock()
+        defer { lastEdit = (coalescingKey, now) }
         if gestureBase != nil {
+            commit(next)
+        } else if let key = coalescingKey, lastEdit.key == key, now.timeIntervalSince(lastEdit.time) < Self.coalescingWindow, undoManager.canUndo {
+            // Controls without begin/end callbacks (ColorPicker): rapid edits of one control share the undo step already registered.
             commit(next)
         } else {
             replaceProject(with: next, actionName: name)
@@ -132,6 +149,7 @@ public final class EditorModel {
         var next = next
         next.modifiedAt = Date()
         project = next
+        playhead = TrimEditing.clamp(playhead, to: next.timeline.trim, duration: next.assets.duration)
         let change: EditorChange
         if old.timeline != next.timeline || old.style.cursor != next.style.cursor || old.assets != next.assets {
             change = .timeline
@@ -149,8 +167,8 @@ public final class EditorModel {
 
     // MARK: Style (inspector bindings)
 
-    public func setStyle<V: Equatable>(_ keyPath: WritableKeyPath<Style, V>, _ value: V, name: String = "Change Style") {
-        apply(name) { $0.style[keyPath: keyPath] = value }
+    public func setStyle<V: Equatable>(_ keyPath: WritableKeyPath<Style, V>, _ value: V, name: String = "Change Style", coalescingKey: String? = nil) {
+        apply(name, coalescingKey: coalescingKey) { $0.style[keyPath: keyPath] = value }
     }
 
     // MARK: Trim
@@ -238,5 +256,9 @@ public final class EditorModel {
     }
 
     /// Frame time step in seconds for frame-stepping.
+    var motionFactoryForCurrentAspect: MotionModelFactory {
+        dependencies.motionFactoryForAspect?(sourceAspect) ?? dependencies.motionFactory
+    }
+
     public var frameDuration: MediaTime { 1 / max(project.assets.frameRate, 1) }
 }

@@ -33,13 +33,68 @@ func writeTestMovie(to url: URL, seconds: Double = 1, fps: Int32 = 30, size: Int
     if writer.status != .completed { throw writer.error ?? NSSError.io("writer failed") }
 }
 
+/// True when this machine can encode the H.264 test movie (CI runners without a hardware encoder skip).
+let canEncodeTestMovie: Bool = {
+    let settings: [String: Any] = [AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: 64, AVVideoHeightKey: 64]
+    guard let w = try? AVAssetWriter(outputURL: FileManager.default.temporaryDirectory.appendingPathComponent("probe-\(UUID().uuidString).mov"), fileType: .mov) else { return false }
+    return w.canApply(outputSettings: settings, forMediaType: .video)
+}()
+
+final class CallCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var n = 0
+    var count: Int { lock.lock(); defer { lock.unlock() }; return n }
+    func bump() { lock.lock(); n += 1; lock.unlock() }
+}
+
 @MainActor
-@Suite struct PreviewEngineTests {
+func makeProjectDir(duration: Double, factory: @escaping MotionModelFactory = { _, _, _, _ in IdentityMotion() }) async throws -> (EditorModel, URL) {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("nss-editor-\(UUID().uuidString).nssproj")
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    try await writeTestMovie(to: dir.appendingPathComponent("screen.mov"))
+    let assets = RecordingAssets(sourcePixelSize: PixelSize(width: 64, height: 64), frameRate: 30, duration: duration)
+    let deps = EditorDependencies(store: RecordingStore(), motionFactory: factory, renderer: PassthroughRenderer(), exporter: ScriptedExporter())
+    return (EditorModel(project: Project(name: "t", assets: assets), reference: ProjectReference(url: dir), track: .empty, dependencies: deps), dir)
+}
+
+@MainActor
+@Suite(.enabled(if: canEncodeTestMovie)) struct PreviewEngineTests {
+    @Test func motionRebuildsCoalesceToOneInFlightPlusOnePending() async throws {
+        let calls = CallCounter()
+        let (model, dir) = try await makeProjectDir(duration: 1, factory: { _, _, _, _ in calls.bump(); Thread.sleep(forTimeInterval: 0.05); return IdentityMotion() })
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let engine = PreviewEngine(model: model)
+        model.changeHandler = { [engine] in engine.modelChanged($0) }
+        for i in 0..<30 { model.setStyle(\.cursor.size, 1 + Double(i) * 0.1) }   // a slider drag
+        try await Task.sleep(for: .milliseconds(500))
+        #expect(calls.count <= 3)   // initial build + at most one in flight + one pending
+        #expect(engine.motionBuildCount <= 3)
+        engine.teardown()
+    }
+
+    @Test func trimAndUndoSeekThePlayers() async throws {
+        let (model, dir) = try await makeProjectDir(duration: 1)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let engine = PreviewEngine(model: model)
+        model.changeHandler = { [engine] in engine.modelChanged($0) }
+        engine.seek(to: 0.2)
+        model.setTrimStart(0.4)
+        #expect(model.playhead == 0.4)
+        #expect(engine.lastSeekTarget == 0.4)
+        model.undo()   // trim back to 0: playhead stays valid and the players match it
+        #expect(engine.lastSeekTarget == model.playhead)
+        model.redo()
+        #expect(model.playhead >= 0.4)
+        #expect(engine.lastSeekTarget == model.playhead)
+        engine.teardown()
+    }
+
+
     @Test func seekDecodesAndPresentsFramesWithoutBlockingMain() async throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("nss-editor-\(UUID().uuidString).nssproj")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
-        do { try await writeTestMovie(to: dir.appendingPathComponent("screen.mov")) } catch { return }  // no encoder available: skip
+        try await writeTestMovie(to: dir.appendingPathComponent("screen.mov"))
 
         let assets = RecordingAssets(sourcePixelSize: PixelSize(width: 64, height: 64), frameRate: 30, duration: 1)
         let deps = EditorDependencies(store: RecordingStore(), motionFactory: { _, _, _, _ in IdentityMotion() }, renderer: PassthroughRenderer(), exporter: ScriptedExporter())
@@ -77,7 +132,7 @@ func writeTestMovie(to url: URL, seconds: Double = 1, fps: Int32 = 30, size: Int
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("nss-editor-\(UUID().uuidString).nssproj")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
-        do { try await writeTestMovie(to: dir.appendingPathComponent("screen.mov")) } catch { return }
+        try await writeTestMovie(to: dir.appendingPathComponent("screen.mov"))
 
         // Recorded duration is longer than the 1 s file.
         let assets = RecordingAssets(sourcePixelSize: PixelSize(width: 64, height: 64), frameRate: 30, duration: 1.2)

@@ -117,7 +117,13 @@ struct PreviewView: NSViewRepresentable {
         return v
     }
 
-    func updateNSView(_ nsView: PreviewNSView, context: Context) {}
+    func updateNSView(_ nsView: PreviewNSView, context: Context) {
+        if nsView.engine !== engine {
+            nsView.engine?.present = nil
+            nsView.model = model
+            nsView.engine = engine
+        }
+    }
 
     static func dismantleNSView(_ nsView: PreviewNSView, coordinator: ()) {
         nsView.stop()

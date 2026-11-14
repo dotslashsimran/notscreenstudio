@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 import NSSCore
+import NSSMotion
 @testable import NSSUI
 
 @Suite struct ZoomBlockEditingTests {
@@ -156,6 +157,37 @@ import NSSCore
         m.undo()
         #expect(m.project.style.padding == Style().padding)
         #expect(!m.canUndo)
+    }
+
+    @Test func rapidColorEditsShareOneUndoStepAndSlowOnesDont() {
+        let m = makeModel()
+        var now = Date(timeIntervalSince1970: 1000)
+        m.clock = { now }
+        for i in 1...5 {
+            m.setStyle(\.background, .solid(RGBAColor(r: Double(i) / 10, g: 0, b: 0)), coalescingKey: "bg")
+            now = now.addingTimeInterval(0.1)
+        }
+        #expect(m.project.style.background == .solid(RGBAColor(r: 0.5, g: 0, b: 0)))
+        m.undo()
+        #expect(m.project.style.background == Style().background)
+        #expect(!m.canUndo)
+        // Redo, then a later edit (outside the window) is its own step.
+        m.redo()
+        now = now.addingTimeInterval(5)
+        m.setStyle(\.background, .solid(RGBAColor(r: 0.9, g: 0, b: 0)), coalescingKey: "bg")
+        m.undo()
+        #expect(m.project.style.background == .solid(RGBAColor(r: 0.5, g: 0, b: 0)))
+    }
+
+    @Test func aspectFactoryIsPreferredWhenProvided() {
+        let m = makeModel()
+        #expect(m.dependencies.motionFactoryForAspect == nil)
+        var deps = m.dependencies
+        let calls = CallCounter()
+        deps.motionFactoryForAspect = { aspect in calls.bump(); return LinearMotionModel.factory }
+        let m2 = EditorModel(project: m.project, reference: m.reference, track: m.track, dependencies: deps)
+        _ = m2.motionFactoryForCurrentAspect
+        #expect(calls.count == 1)
     }
 
     @Test func noOpEditsDontRegisterUndo() {

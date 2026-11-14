@@ -94,7 +94,7 @@ struct InspectorView: View {
             case .solid(let c):
                 ColorPicker("Color", selection: Binding(
                     get: { InspectorBindings.color(c) },
-                    set: { model.setStyle(\.background, .solid(InspectorBindings.rgba($0)), name: "Background Color") }
+                    set: { model.setStyle(\.background, .solid(InspectorBindings.rgba($0)), name: "Background Color", coalescingKey: "bgcolor") }
                 ))
             case .gradient(let stops, let angle):
                 ForEach(Array(stops.enumerated()), id: \.offset) { i, stop in
@@ -103,7 +103,7 @@ struct InspectorView: View {
                         set: { new in
                             var s = stops
                             s[i].color = InspectorBindings.rgba(new)
-                            model.setStyle(\.background, .gradient(stops: s, angleDegrees: angle), name: "Gradient")
+                            model.setStyle(\.background, .gradient(stops: s, angleDegrees: angle), name: "Gradient", coalescingKey: "stop\(i)")
                         }
                     ))
                 }
@@ -134,16 +134,23 @@ struct InspectorView: View {
         panel.allowedContentTypes = [.image]
         panel.allowsMultipleSelection = false
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        // Copy into the bundle so the project stays self-contained.
+        // Copy into the bundle (off the main thread) so the project stays self-contained.
         let name = "background-" + url.lastPathComponent
         let dest = model.reference.url.appendingPathComponent(name)
-        do {
-            if FileManager.default.fileExists(atPath: dest.path) { try FileManager.default.removeItem(at: dest) }
-            try FileManager.default.copyItem(at: url, to: dest)
-            fileError = nil
-            model.setStyle(\.background, .image(file: name), name: "Background Image")
-        } catch {
-            fileError = "Couldn't copy image: \(error.localizedDescription)"
+        Task {
+            let result: Result<Void, Error> = await Task.detached {
+                Result {
+                    if FileManager.default.fileExists(atPath: dest.path) { try FileManager.default.removeItem(at: dest) }
+                    try FileManager.default.copyItem(at: url, to: dest)
+                }
+            }.value
+            switch result {
+            case .success:
+                fileError = nil
+                model.setStyle(\.background, .image(file: name), name: "Background Image")
+            case .failure(let error):
+                fileError = "Couldn't copy image: \(error.localizedDescription)"
+            }
         }
     }
 
@@ -197,7 +204,7 @@ struct InspectorView: View {
                 ), range: 0.001...0.015, format: { String(format: "%.1f%%", $0 * 100) })
                 ColorPicker("Border color", selection: Binding(
                     get: { InspectorBindings.color(b.color) },
-                    set: { model.setStyle(\.camera.border, CameraBorder(width: b.width, color: InspectorBindings.rgba($0)), name: "Camera Border") }
+                    set: { model.setStyle(\.camera.border, CameraBorder(width: b.width, color: InspectorBindings.rgba($0)), name: "Camera Border", coalescingKey: "bordercolor") }
                 ))
             }
             Toggle("Mirror", isOn: model.styleBinding(\.camera.mirror, name: "Camera Mirror"))

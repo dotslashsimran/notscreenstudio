@@ -3,7 +3,7 @@ import CoreMedia
 import CoreVideo
 import NSSCore
 
-/// Real-time `FrameSource` for the preview: wraps an `AVPlayer` + `AVPlayerItemVideoOutput` for one video file.
+/// Real-time video source for the preview (not a `FrameSource`: the preview pulls synchronously from the display link): wraps an `AVPlayer` + `AVPlayerItemVideoOutput` for one video file.
 /// Frame selection is "at or before `t`" (what `AVPlayerItemVideoOutput` returns for an item time).
 /// Main-actor only: AVFoundation objects are driven from the preview's display link.
 @MainActor
@@ -36,26 +36,5 @@ public final class PlayerVideoTrack {
               let pb = output.copyPixelBuffer(forItemTime: t, itemTimeForDisplay: nil) else { return false }
         lastFrame = pb
         return true
-    }
-}
-
-/// Async `FrameSource` adapter over live players (the contract shape; the preview itself uses the sync path).
-public final class PlayerFrameSource: FrameSource, @unchecked Sendable {
-    private let screen: PlayerVideoTrack
-    private let camera: PlayerVideoTrack?
-
-    @MainActor public init(screen: PlayerVideoTrack, camera: PlayerVideoTrack?) {
-        self.screen = screen
-        self.camera = camera
-    }
-
-    public func screenFrame(at t: MediaTime) async -> CVPixelBuffer? {
-        let box = await MainActor.run { _ = screen.pull(at: t); return Unchecked(value: screen.lastFrame) }
-        return box.value
-    }
-
-    public func cameraFrame(at t: MediaTime) async -> CVPixelBuffer? {
-        let box = await MainActor.run { _ = camera?.pull(at: t); return Unchecked(value: camera?.lastFrame) }
-        return box.value
     }
 }
