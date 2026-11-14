@@ -84,7 +84,8 @@ struct ScreenResult: Sendable {
 
 /// SCStream -> screen.mov. The first complete frame defines the shared origin.
 final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
-    private let stream: SCStream
+    private let filter: SCContentFilter
+    private var stream: SCStream?
     private let plan: ScreenStreamPlan
     private let writer: SampleFileWriter
     private let origin: SharedOrigin
@@ -97,6 +98,7 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
 
     init(filter: SCContentFilter, plan: ScreenStreamPlan, url: URL, origin: SharedOrigin,
          onFailure: @escaping @Sendable (NSSError) -> Void) throws {
+        self.filter = filter
         self.plan = plan
         self.origin = origin
         self.onFailure = onFailure
@@ -111,11 +113,12 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
         if plan.capturesSystemAudio {
             try writer.addInput("audio", mediaType: .audio, settings: ScreenStreamPlan.systemAudioSettings)
         }
-        self.stream = SCStream(filter: filter, configuration: plan.configuration(), delegate: nil)
         super.init()
     }
 
     func start() async throws {
+        let stream = SCStream(filter: filter, configuration: plan.configuration(), delegate: self)
+        lock.withLock { self.stream = stream }
         do {
             try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: videoQueue)
             if plan.capturesSystemAudio {
@@ -134,7 +137,7 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
             stopping = true
             return endedHost
         }
-        if already == nil { try? await stream.stopCapture() }
+        if already == nil, let stream = lock.withLock({ self.stream }) { try? await stream.stopCapture() }
         let end = already ?? endHost
         let hadMedia = try await writer.finish(endHost: end)
         return ScreenResult(frames: hadMedia ? writer.sampleCount : 0, endHost: end)
