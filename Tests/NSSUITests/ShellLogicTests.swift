@@ -92,6 +92,20 @@ import NSSCore
 @MainActor @Suite struct BubbleGeometryTests {
     let source = CGRect(x: 0, y: 0, width: 1440, height: 900)
 
+    @Test func outputSpaceKeepsBubbleOverTheSameContentPixel() {
+        // 16:9 source in a 16:9 output with 10% padding: content is 0.8 of the height, so 0.8 wide.
+        let r = BubbleGeometry.toOutputSpace(
+            center: NormalizedPoint(x: 1, y: 1), size: 0.25, outputAspect: 16.0 / 9, sourceAspect: 16.0 / 9, padding: 0.1)
+        #expect(abs(r.center.x - 0.9) < 1e-9 && abs(r.center.y - 0.9) < 1e-9)
+        #expect(abs(r.size - 0.2) < 1e-9)
+        // Source centre stays at the output centre for any aspect.
+        let c = BubbleGeometry.toOutputSpace(
+            center: .center, size: 0.1, outputAspect: 9.0 / 16, sourceAspect: 16.0 / 9, padding: 0.06)
+        #expect(abs(c.center.x - 0.5) < 1e-9 && abs(c.center.y - 0.5) < 1e-9)
+        // A 9:16 output shrinks a 16:9 source to the output width minus padding, so the bubble shrinks too.
+        #expect(c.size < 0.1)
+    }
+
     @Test func normalizesCenterWithTopLeftOrigin() throws {
         // A 200x200 panel in the bottom-left corner of the source (AppKit y = 0 is the bottom).
         let panel = CGRect(x: 0, y: 0, width: 200, height: 200)

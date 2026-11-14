@@ -4,6 +4,8 @@ import Testing
 @Suite struct NSSUITests {
     @Test @MainActor func viewsConstruct() {
         _ = EditorView()
-        _ = MenuBarContent()
+        let rig = ShellRig()
+        defer { rig.cleanup() }
+        _ = MenuBarContent(model: rig.model)
     }
 }

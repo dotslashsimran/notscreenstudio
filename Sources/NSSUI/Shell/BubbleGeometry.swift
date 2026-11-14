@@ -35,6 +35,19 @@ public enum BubbleGeometry {
         return (center, Double(panelFrame.width / sourceRect.width))
     }
 
+    /// Re-expresses a bubble given relative to the capture source (what the user dragged over) in the
+    /// OUTPUT space that `Style.camera` uses: the source is drawn inside the output inset by `padding`, so the
+    /// bubble keeps its place over the content. `size` is a fraction of the source width and becomes a fraction
+    /// of the output width.
+    public static func toOutputSpace(
+        center: NormalizedPoint, size: Double, outputAspect: Double, sourceAspect: Double, padding: Double
+    ) -> (center: NormalizedPoint, size: Double) {
+        let r = PreviewGeometry.contentRect(outputAspect: outputAspect, sourceAspect: sourceAspect, padding: padding)
+        return (
+            NormalizedPoint(x: r.minX + center.x * r.width, y: r.minY + center.y * r.height),
+            size * r.width)
+    }
+
     /// Inverse of `normalize`: the panel frame (AppKit coordinates) for a normalized center and size.
     public static func panelFrame(
         center: NormalizedPoint, size: Double, shape: CameraShape, in sourceRect: CGRect,

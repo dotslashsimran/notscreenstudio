@@ -5,8 +5,14 @@ import SwiftUI
 
 @main
 struct NotScreenStudioApp: App {
-    @State private var app = AppModel()
+    @State private var app: AppModel
     @Environment(\.openWindow) private var openWindow
+
+    init() {
+        // `--smoke-test`: build every dependency, render one frame, exit. Used by scripts/bundle.sh and CI.
+        if CommandLine.arguments.contains("--smoke-test") { SmokeTest.runAndExit() }
+        _app = State(initialValue: AppModel())
+    }
 
     var body: some Scene {
         MenuBarExtra {
@@ -56,8 +62,8 @@ struct EditorWindowContent: View {
     var dependencies: EditorDependencies
 
     var body: some View {
-        if let saved = model.lastSaved {
-            EditorView(reference: saved.reference, dependencies: dependencies)
+        if let reference = model.lastSaved?.reference ?? model.latestProject {
+            EditorView(reference: reference, dependencies: dependencies)
         } else {
             EditorView()
         }

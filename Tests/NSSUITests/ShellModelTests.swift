@@ -199,6 +199,30 @@ import NSSCore
         if case .editing = rig.model.phase {} else { Issue.record("phase \(rig.model.phase)") }
     }
 
+    @Test func launchFindsTheNewestProjectSoTheEditorCanReopenIt() async throws {
+        let rig = ShellRig()
+        defer { rig.cleanup() }
+        await rig.model.launch()
+        #expect(rig.model.latestProject == nil)
+        rig.model.requestEditor()
+        #expect(rig.model.editorRequestID == 0)
+        await rig.model.startRecording()
+        await rig.model.stopRecording()
+        let saved = try #require(rig.model.lastSaved)
+        #expect(rig.model.latestProject == saved.reference)
+
+        // A fresh model on the same library (an app relaunch) discovers it.
+        let again = ShellModel(
+            services: ShellServices(
+                session: rig.session, inputLogger: rig.logger, store: rig.store,
+                sources: StubSourceProvider(), permissions: StubPermissions()),
+            effects: rig.effects, settingsStore: ShellSettingsStore(defaults: rig.defaults))
+        await again.launch()
+        #expect(again.latestProject?.url.standardizedFileURL == saved.reference.url.standardizedFileURL)
+        again.requestEditor()
+        #expect(again.editorRequestID == 1)
+    }
+
     @Test func bubbleGeometryIsSavedIntoProjectAndSettings() async throws {
         let rig = ShellRig(initial: ShellSettings(cameraEnabled: true, cameraShape: .squircle))
         defer { rig.cleanup() }
@@ -214,9 +238,14 @@ import NSSCore
         let cam = project.style.camera
         #expect(cam.visible)
         #expect(cam.shape == .squircle)
-        #expect(abs(cam.position.x - 1144.0 / 1440) < 1e-9)
-        #expect(abs(cam.position.y - (900.0 - 244.0) / 900) < 1e-9)
-        #expect(abs(cam.size - 0.2) < 1e-9)
+        // Saved in OUTPUT space: the 2880x1800 source sits inside the padded 16:9 output.
+        let expected = BubbleGeometry.toOutputSpace(
+            center: NormalizedPoint(x: 1144.0 / 1440, y: (900.0 - 244.0) / 900), size: 0.2,
+            outputAspect: AspectRatio.r16x9.ratio, sourceAspect: 2880.0 / 1800, padding: project.style.padding)
+        #expect(abs(cam.position.x - expected.center.x) < 1e-9)
+        #expect(abs(cam.position.y - expected.center.y) < 1e-9)
+        #expect(abs(cam.size - expected.size) < 1e-9)
+        #expect(cam.size < 0.2)
         #expect(abs(rig.model.settings.bubbleSize - 0.2) < 1e-9)
     }
 

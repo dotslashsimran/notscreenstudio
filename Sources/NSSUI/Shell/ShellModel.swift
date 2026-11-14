@@ -49,6 +49,8 @@ public final class ShellModel {
     /// A non-fatal remark about the last start, for example "Camera skipped: permission denied".
     public private(set) var notice: String?
     public private(set) var lastSaved: SavedRecording?
+    /// Newest project bundle in the library (from a previous run or the last recording), so the editor can reopen it.
+    public private(set) var latestProject: ProjectReference?
     /// Increments each time the editor should open. Views watch it and call `openWindow`.
     public private(set) var editorRequestID = 0
     /// Increments each time the permissions window should open.
@@ -159,12 +161,13 @@ public final class ShellModel {
 
     /// Call once at launch: reads permissions and asks to show onboarding if screen recording is missing.
     public func launch() async {
+        latestProject = try? await services.store.listProjects().first
         await refreshSources()
         if !missingRequiredPermissions.isEmpty { requestOnboarding() }
     }
 
     public func requestOnboarding() { onboardingRequestID += 1 }
-    public func requestEditor() { if lastSaved != nil { editorRequestID += 1 } }
+    public func requestEditor() { if lastSaved != nil || latestProject != nil { editorRequestID += 1 } }
     public func dismissError() { apply(.dismissError) }
     public func dismissNotice() { notice = nil }
     /// Shows a non-fatal message in the menu, for example a setup problem found at launch.
@@ -271,14 +274,18 @@ public final class ShellModel {
         // From here the finished recording exists: a failed save keeps the bundle.
         let track = await services.inputLogger.stop(recordingStartHostTime: assets.startHostTime)
         var style = Style()
-        style.camera = Self.cameraBubble(
-            hasCamera: assets.cameraFile != nil, shape: settings.cameraShape,
-            geometry: bubble ?? (settings.bubbleCenter, settings.bubbleSize))
+        // The bubble was placed over the capture source; `Style.camera` is in output space (padding included).
+        let placed = BubbleGeometry.toOutputSpace(
+            center: (bubble ?? (settings.bubbleCenter, settings.bubbleSize)).0,
+            size: (bubble ?? (settings.bubbleCenter, settings.bubbleSize)).1,
+            outputAspect: style.aspectRatio.ratio, sourceAspect: assets.sourcePixelSize.aspect, padding: style.padding)
+        style.camera = Self.cameraBubble(hasCamera: assets.cameraFile != nil, shape: settings.cameraShape, geometry: placed)
         let project = Project(name: active.name, assets: assets, style: style)
         try await services.store.saveCursorTrack(track, for: active.reference, assets: assets)
         try await services.store.save(project, to: active.reference)
         let saved = SavedRecording(reference: active.reference, project: project, cursorTrack: track)
         lastSaved = saved
+        latestProject = saved.reference
         return saved
     }
 

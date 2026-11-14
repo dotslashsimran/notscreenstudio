@@ -50,17 +50,6 @@ extension ShellModel {
         let (source, _) = Self.resolve(settings.source, in: listing, fallbackDisplay: CGMainDisplayID())
         return source == .display(id: display.id)
     }
-
-    /// A model backed by stubs, for previews and the default menu content.
-    public static func placeholder() -> ShellModel {
-        let defaults = UserDefaults(suiteName: "notscreenstudio.placeholder") ?? .standard
-        return ShellModel(
-            services: ShellServices(
-                session: PlaceholderSession(), inputLogger: PlaceholderLogger(), store: PlaceholderStore(),
-                sources: StubSourceProvider(), permissions: StubPermissions()),
-            effects: AppKitShellEffects(),
-            settingsStore: ShellSettingsStore(defaults: defaults))
-    }
 }
 
 /// The menu bar popover: one big Record button, then source, microphone and camera choices.
@@ -71,7 +60,7 @@ public struct MenuBarContent: View {
     private var openPermissions: () -> Void
 
     public init(
-        model: ShellModel = .placeholder(),
+        model: ShellModel,
         openEditor: @escaping () -> Void = {},
         openPermissions: @escaping () -> Void = {}
     ) {
@@ -216,7 +205,7 @@ public struct MenuBarContent: View {
 
     private var footer: some View {
         VStack(alignment: .leading, spacing: 4) {
-            if model.lastSaved != nil { Button("Open Last Recording", action: openEditor).buttonStyle(.plain) }
+            if model.lastSaved != nil || model.latestProject != nil { Button("Open Last Recording", action: openEditor).buttonStyle(.plain) }
             Button("Permissions…", action: openPermissions).buttonStyle(.plain)
             Button("Quit notscreenstudio") { NSApplication.shared.terminate(nil) }.buttonStyle(.plain)
         }
