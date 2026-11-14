@@ -283,6 +283,38 @@ struct MetalRendererTests {
         #expect(TB.pixel(out, 2, 2).near(RGB(r: 128, g: 128, b: 128), 3))
     }
 
+    @Test func imageBackgroundReloadsWhenTheFileChangesOrAppears() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("nss-render-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("bg.png")
+        let out = try PixelBuffers.make(width: 320, height: 180)
+        var style = TB.plainStyle(padding: 0.3)
+        style.background = .image(file: "bg.png")
+        let r = try MetalRenderer(assetBaseURL: dir)
+        let screen = try TB.filled(64, 36, TB.green)
+
+        // Rendered before the file exists: grey fallback, and the miss must not stick.
+        try r.render(screen: screen, camera: nil, state: TB.hiddenCursor(), style: style, into: out)
+        #expect(TB.pixel(out, 2, 2).near(RGB(r: 128, g: 128, b: 128), 3))
+
+        try writePNG(url, width: 32, height: 18) { _, _ in (255, 255, 0) }
+        try r.render(screen: screen, camera: nil, state: TB.hiddenCursor(), style: style, into: out)
+        #expect(TB.pixel(out, 2, 2).near(RGB(r: 255, g: 255, b: 0), 2))
+
+        // Same path rewritten with new pixels (and a different size so the stamp changes even on
+        // filesystems with coarse timestamps): the new image is shown.
+        try writePNG(url, width: 64, height: 36) { _, _ in (0, 255, 255) }
+        try r.render(screen: screen, camera: nil, state: TB.hiddenCursor(), style: style, into: out)
+        #expect(TB.pixel(out, 2, 2).near(RGB(r: 0, g: 255, b: 255), 2))
+
+        // Same size, explicit invalidation.
+        try writePNG(url, width: 64, height: 36) { _, _ in (255, 0, 255) }
+        r.invalidateBackgroundImage()
+        try r.render(screen: screen, camera: nil, state: TB.hiddenCursor(), style: style, into: out)
+        #expect(TB.pixel(out, 2, 2).near(RGB(r: 255, g: 0, b: 255), 2))
+    }
+
     private func writePNG(_ url: URL, width: Int, height: Int, _ f: (Int, Int) -> (UInt8, UInt8, UInt8)) throws {
         var data = [UInt8](repeating: 255, count: width * height * 4)
         for y in 0..<height {
@@ -355,8 +387,10 @@ struct MetalRendererTests {
         times.sort()
         let best = times[0], median = times[times.count / 2]
         print("MetalRenderer 4K frame: best \(String(format: "%.2f", best)) ms, median \(String(format: "%.2f", median)) ms")
-        // Strict budget on real hardware; loose on CI VMs (paravirtual GPU).
-        let budget = ProcessInfo.processInfo.environment["CI"] == nil ? 8.0 : 100.0
-        #expect(best < budget, "best 4K frame \(best) ms over \(budget) ms budget")
+        // Wall-clock budgets are flaky on loaded dev machines and CI VMs: only assert when asked to
+        // (`NSS_BENCH=1 swift test --filter benchmark4KFrame`). Otherwise just report the timing.
+        if ProcessInfo.processInfo.environment["NSS_BENCH"] == "1" {
+            #expect(median < 8, "median 4K frame \(median) ms over the 8 ms budget")
+        }
     }
 }

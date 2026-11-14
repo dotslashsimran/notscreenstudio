@@ -71,6 +71,14 @@ import NSSCore
         #expect(abs(back.x - p.x) < 1e-9 && abs(back.y - p.y) < 1e-9)
     }
 
+    @Test func nonFiniteCameraFallsBackToIdentity() {
+        let bad = CameraState(scale: .nan, center: NormalizedPoint(x: .infinity, y: -.infinity))
+        let l = RenderLayout(outputSize: PixelSize(width: 1920, height: 1080), sourceSize: PixelSize(width: 1920, height: 1080), style: Style(), camera: bad)
+        #expect(l.camera == .identity)
+        let p = l.outputPoint(forSource: .center)
+        #expect(p.x.isFinite && p.y.isFinite)
+    }
+
     @Test func rippleGrowsAndFades() {
         let l = RenderLayout(outputSize: PixelSize(width: 1920, height: 1080), sourceSize: PixelSize(width: 1920, height: 1080), style: Style(), camera: .identity)
         #expect(l.rippleRadius(progress: 0) < l.rippleRadius(progress: 0.5))

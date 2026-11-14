@@ -37,7 +37,7 @@ public final class MetalRenderer: FrameRenderer, @unchecked Sendable {
 
     private let lock = NSLock()
     private var baseURL: URL?
-    private var imageCache: (path: String, texture: MTLTexture?)?
+    private var imageCache: (path: String, stamp: ImageStamp, texture: MTLTexture?)?
 
     /// - Parameter assetBaseURL: folder used to resolve relative `Background.image(file:)` names
     ///   (normally the `.nssproj` bundle).
@@ -289,7 +289,23 @@ public final class MetalRenderer: FrameRenderer, @unchecked Sendable {
         return (tex, cvTex)
     }
 
-    /// Called with `lock` held. Decodes once per path and caches (including failures).
+    /// Drops the cached background image so the next frame reloads it from disk. The cache already
+    /// reloads when the file's path, modification time or size changes, so this is only needed if a
+    /// file is rewritten in place with identical size within the filesystem's timestamp resolution.
+    public func invalidateBackgroundImage() {
+        lock.withLock { imageCache = nil }
+    }
+
+    /// Identity of the file on disk: (mtime seconds, mtime nanoseconds, size); all -1 when missing.
+    /// A plain `stat` per frame: no allocation, so it is safe on the hot path.
+    private static func fileStamp(_ path: String) -> ImageStamp {
+        var st = stat()
+        guard stat(path, &st) == 0 else { return ImageStamp(sec: -1, nsec: -1, size: -1) }
+        return ImageStamp(sec: Int64(st.st_mtimespec.tv_sec), nsec: Int64(st.st_mtimespec.tv_nsec), size: Int64(st.st_size))
+    }
+
+    /// Called with `lock` held. Decodes once per (path, mtime, size) and caches the result, including
+    /// a failed load; a file that appears, changes or disappears later gets a new stamp and is reloaded.
     private func backgroundImage(for bg: Background) -> MTLTexture? {
         guard case .image(let file) = bg else { return nil }
         let url: URL
@@ -300,9 +316,11 @@ public final class MetalRenderer: FrameRenderer, @unchecked Sendable {
         } else {
             url = URL(fileURLWithPath: file)
         }
-        if let cached = imageCache, cached.path == url.path { return cached.texture }
-        let tex = loadImageTexture(url)
-        imageCache = (url.path, tex)
+        let path = url.path
+        let stamp = Self.fileStamp(path)
+        if let cached = imageCache, cached.path == path, cached.stamp == stamp { return cached.texture }
+        let tex = stamp.size < 0 ? nil : loadImageTexture(url)
+        imageCache = (path, stamp, tex)
         return tex
     }
 
@@ -336,6 +354,12 @@ public final class MetalRenderer: FrameRenderer, @unchecked Sendable {
         }
         return tex
     }
+}
+
+struct ImageStamp: Equatable {
+    var sec: Int64
+    var nsec: Int64
+    var size: Int64
 }
 
 /// Compiles the shader source once per device (it takes ~100 ms) and caches the pipeline state.

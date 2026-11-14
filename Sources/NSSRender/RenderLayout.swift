@@ -18,8 +18,12 @@ public struct RenderLayout: Sendable, Equatable {
     public init(outputSize: PixelSize, sourceSize: PixelSize, style: Style, camera: CameraState) {
         self.outputSize = outputSize
         self.sourceSize = sourceSize
+        // Non-finite camera values (e.g. a spring that blew up) fall back to identity per component
+        // instead of poisoning every uniform with NaN.
         var cam = camera
-        cam.scale = max(camera.scale, 1e-3)
+        cam.scale = camera.scale.isFinite ? max(camera.scale, 1e-3) : 1
+        if !camera.center.x.isFinite { cam.center.x = 0.5 }
+        if !camera.center.y.isFinite { cam.center.y = 0.5 }
         self.camera = cam
 
         let w = Double(max(outputSize.width, 1))
