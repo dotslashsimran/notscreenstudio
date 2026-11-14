@@ -135,6 +135,14 @@ import ScreenCaptureKit
         #expect(comp?[AVVideoAverageBitRateKey] as? Int == p.bitrate)
     }
 
+    @Test func aacBitrateClampsToSampleRate() {
+        #expect(DeviceRecorder.aacBitrate(channels: 1, sampleRate: 48_000) == 96_000)
+        #expect(DeviceRecorder.aacBitrate(channels: 2, sampleRate: 44_100) == 160_000)
+        #expect(DeviceRecorder.aacBitrate(channels: 1, sampleRate: 16_000) == 64_000)
+        #expect(DeviceRecorder.aacBitrate(channels: 1, sampleRate: 8_000) == 32_000)
+        #expect(DeviceRecorder.aacBitrate(channels: 2, sampleRate: 8_000) == 64_000)
+    }
+
     @Test func micAudioSettingsAreAAC() {
         var asbd = AudioStreamBasicDescription(mSampleRate: 44100, mFormatID: kAudioFormatLinearPCM, mFormatFlags: kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked, mBytesPerPacket: 4, mFramesPerPacket: 1, mBytesPerFrame: 4, mChannelsPerFrame: 1, mBitsPerChannel: 32, mReserved: 0)
         var fd: CMAudioFormatDescription?
@@ -201,6 +209,13 @@ import ScreenCaptureKit
         let s = ScreenCaptureRecordingSession()
         #expect(await s.state == .idle)
         await #expect(throws: NSSError.self) { _ = try await s.stop() }
+    }
+
+    @Test func secondStopThrowsWithoutTouchingState() async {
+        let s = ScreenCaptureRecordingSession()
+        await #expect(throws: NSSError.self) { _ = try await s.stop() }
+        await #expect(throws: NSSError.self) { _ = try await s.stop() }
+        #expect(await s.state == .idle)
     }
 
     @Test(.enabled(if: !CapturePermissions.screenRecordingGranted))

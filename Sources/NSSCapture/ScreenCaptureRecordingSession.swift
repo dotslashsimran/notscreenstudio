@@ -19,6 +19,8 @@ public actor ScreenCaptureRecordingSession: RecordingSession {
     private var fatalError: NSSError?
     private var screenEndedEarly = false
     private var bundleURL: URL?
+    /// Files created by the current attempt only. Cleanup never touches anything else.
+    private var createdFiles: [URL] = []
 
     public init() {}
 
@@ -34,6 +36,9 @@ public actor ScreenCaptureRecordingSession: RecordingSession {
         default: break
         }
         hub.set(.preparing)
+        await discardRecorders() // recorders left over from a failed run
+        files = nil; plan = nil; self.bundleURL = nil; createdFiles = []
+        fatalError = nil
         do {
             try await begin(options: options, bundleURL: bundleURL)
             hub.set(.recording(startedAt: Date()))
@@ -43,6 +48,16 @@ public actor ScreenCaptureRecordingSession: RecordingSession {
             hub.set(.failed(message: Self.message(mapped)))
             throw mapped
         }
+    }
+
+    /// Stops any recorders still held (best effort) without deleting files.
+    private func discardRecorders() async {
+        let (s, m, c) = (screen, mic, camera)
+        screen = nil; mic = nil; camera = nil
+        let now = CaptureMath.hostNow()
+        if let s { _ = try? await s.stop(endHost: now) }
+        if let m { _ = try? await m.stop(endHost: now) }
+        if let c { _ = try? await c.stop(endHost: now) }
     }
 
     private func begin(options: RecordingOptions, bundleURL: URL) async throws {
@@ -55,7 +70,6 @@ public actor ScreenCaptureRecordingSession: RecordingSession {
 
         self.bundleURL = bundleURL
         origin = SharedOrigin()
-        fatalError = nil
         screenEndedEarly = false
         let files = CaptureFilePlan(options: options)
         self.files = files
@@ -83,15 +97,18 @@ public actor ScreenCaptureRecordingSession: RecordingSession {
 
         // Devices first (they warm up slowly). Their samples are dropped until the origin exists.
         if let id = options.micDeviceID, let name = files.mic {
+            createdFiles.append(files.url(name, in: bundleURL))
             let r = try DeviceRecorder(kind: .microphone, deviceID: id, url: files.url(name, in: bundleURL), origin: origin, onFailure: report(.microphone, false))
             try await r.start()
             mic = r
         }
         if let id = options.cameraDeviceID, let name = files.camera {
+            createdFiles.append(files.url(name, in: bundleURL))
             let r = try DeviceRecorder(kind: .camera, deviceID: id, url: files.url(name, in: bundleURL), origin: origin, onFailure: report(.camera, false))
             try await r.start()
             camera = r
         }
+        createdFiles.append(files.url(files.screen, in: bundleURL))
         let recorder = try ScreenRecorder(
             filter: filter, plan: plan, url: files.url(files.screen, in: bundleURL),
             origin: origin, onFailure: report(.screen, true))
@@ -101,6 +118,9 @@ public actor ScreenCaptureRecordingSession: RecordingSession {
         // Give the first frame a moment so `start` returns with the origin already set.
         for _ in 0..<300 where !recorder.hasFirstFrame {
             try? await Task.sleep(for: .milliseconds(10))
+        }
+        if !recorder.hasFirstFrame {
+            throw NSSError.io("No screen frames arrived. Check that the selected source is visible and try again.")
         }
     }
 
@@ -114,9 +134,15 @@ public actor ScreenCaptureRecordingSession: RecordingSession {
     }
 
     public func stop() async throws -> RecordingAssets {
+        // Serialize against an in-flight start().
+        while case .preparing = hub.current { try? await Task.sleep(for: .milliseconds(10)) }
+        // Take ownership synchronously (no await before this point) so a second stop() finds nothing.
         guard let screen, let plan, let files else {
             throw NSSError.unsupported("No recording is in progress.")
         }
+        let (mic, camera) = (self.mic, self.camera)
+        let created = createdFiles
+        self.screen = nil; self.mic = nil; self.camera = nil
         hub.set(.stopping)
         let stopHost = CaptureMath.hostNow()
 
@@ -125,15 +151,14 @@ public actor ScreenCaptureRecordingSession: RecordingSession {
         do { screenResult = try await screen.stop(endHost: stopHost) } catch { screenError = error }
 
         var micHas = false, camHas = false
-        var deviceError: Error?
-        if let mic { do { micHas = try await mic.stop(endHost: stopHost) } catch { deviceError = error } }
-        if let camera { do { camHas = try await camera.stop(endHost: stopHost) } catch { deviceError = error } }
-        _ = deviceError // a broken mic/camera file never costs the screen recording
-        self.screen = nil; self.mic = nil; self.camera = nil
+        if let mic { micHas = (try? await mic.stop(endHost: stopHost)) ?? false }
+        if let camera { camHas = (try? await camera.stop(endHost: stopHost)) ?? false }
+        // A broken mic/camera file never costs the screen recording.
 
         guard let result = screenResult, result.frames > 0, let o = origin.current else {
             let err = fatalError ?? screenError.map { CaptureErrorMapper.map($0, context: .writer) }
                 ?? NSSError.io("No screen frames were captured.")
+            for u in created { try? FileManager.default.removeItem(at: u) }
             hub.set(.failed(message: Self.message(err)))
             throw err
         }
@@ -145,21 +170,16 @@ public actor ScreenCaptureRecordingSession: RecordingSession {
             frameRate: Double(plan.frameRate),
             duration: o.duration(endingAt: result.endHost),
             startHostTime: o.hostTime)
+        if !micHas, let f = files.mic, let d = bundleURL { try? FileManager.default.removeItem(at: files.url(f, in: d)) }
+        if !camHas, let f = files.camera, let d = bundleURL { try? FileManager.default.removeItem(at: files.url(f, in: d)) }
         hub.set(.finished)
         return assets
     }
 
     private func teardownAfterFailedStart() async {
-        let now = CaptureMath.hostNow()
-        if let screen { _ = try? await screen.stop(endHost: now) }
-        if let mic { _ = try? await mic.stop(endHost: now) }
-        if let camera { _ = try? await camera.stop(endHost: now) }
-        screen = nil; mic = nil; camera = nil
-        if let files, let dir = bundleURL {
-            for n in [files.screen, files.camera, files.mic].compactMap({ $0 }) {
-                try? FileManager.default.removeItem(at: files.url(n, in: dir))
-            }
-        }
+        await discardRecorders()
+        for u in createdFiles { try? FileManager.default.removeItem(at: u) }
+        createdFiles = []
     }
 
     static func message(_ e: NSSError) -> String {

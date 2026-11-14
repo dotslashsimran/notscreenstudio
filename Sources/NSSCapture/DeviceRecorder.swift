@@ -18,6 +18,7 @@ final class DeviceRecorder: NSObject, AVCaptureAudioDataOutputSampleBufferDelega
     private let lock = NSLock()
     private var writer: SampleFileWriter?
     private var stopped = false
+    private var writerFailed = false
     private var endedHost: Double?
     private var observers: [NSObjectProtocol] = []
 
@@ -127,8 +128,11 @@ final class DeviceRecorder: NSObject, AVCaptureAudioDataOutputSampleBufferDelega
         if o.isEntirelyBefore(start: start, duration: sample.duration.validOrZero.seconds) { return }
 
         let w: SampleFileWriter? = lock.withLock {
-            if stopped || endedHost != nil && writer == nil { return nil }
-            if writer == nil { writer = makeWriter(for: sample, origin: o) }
+            if stopped || writerFailed || (endedHost != nil && writer == nil) { return nil }
+            if writer == nil {
+                writer = makeWriter(for: sample, origin: o)
+                if writer == nil { writerFailed = true } // set up once, report once
+            }
             return writer
         }
         w?.append(sample, to: "main")
@@ -140,7 +144,11 @@ final class DeviceRecorder: NSObject, AVCaptureAudioDataOutputSampleBufferDelega
             let w = try SampleFileWriter(url: url, fileType: kind == .microphone ? .m4a : .mov, context: context, onFailure: onFailure)
             switch kind {
             case .microphone:
-                try w.addInput("main", mediaType: .audio, settings: Self.audioSettings(format), hint: format)
+                do {
+                    try w.addInput("main", mediaType: .audio, settings: Self.audioSettings(format), hint: format)
+                } catch {
+                    try w.addInput("main", mediaType: .audio, settings: Self.audioSettings(format, withBitrate: false), hint: format)
+                }
             case .camera:
                 let dims = CMVideoFormatDescriptionGetDimensions(format)
                 let size = PixelSize(width: Int(dims.width), height: Int(dims.height))
@@ -158,16 +166,29 @@ final class DeviceRecorder: NSObject, AVCaptureAudioDataOutputSampleBufferDelega
         }
     }
 
-    static func audioSettings(_ format: CMFormatDescription) -> [String: Any] {
+    /// Highest AAC bitrate the sample rate comfortably allows, per channel.
+    static func aacBitrate(channels: Int, sampleRate: Double) -> Int {
+        let base = channels == 1 ? 96_000 : 160_000
+        let perChannelCap: Int
+        switch sampleRate {
+        case ..<12_000: perChannelCap = 32_000
+        case ..<24_000: perChannelCap = 64_000
+        default: perChannelCap = 128_000
+        }
+        return min(base, perChannelCap * channels)
+    }
+
+    static func audioSettings(_ format: CMFormatDescription, withBitrate: Bool = true) -> [String: Any] {
         let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(format)?.pointee
         let channels = min(max(Int(asbd?.mChannelsPerFrame ?? 1), 1), 2)
         let rate = (asbd?.mSampleRate ?? 48_000) > 0 ? (asbd?.mSampleRate ?? 48_000) : 48_000
-        return [
+        var s: [String: Any] = [
             AVFormatIDKey: kAudioFormatMPEG4AAC,
             AVSampleRateKey: rate,
             AVNumberOfChannelsKey: channels,
-            AVEncoderBitRateKey: channels == 1 ? 96_000 : 160_000,
         ]
+        if withBitrate { s[AVEncoderBitRateKey] = aacBitrate(channels: channels, sampleRate: rate) }
+        return s
     }
 
     static func videoSettings(_ size: PixelSize, _ codec: AVVideoCodecType) -> [String: Any] {
