@@ -1,4 +1,5 @@
 import AppKit
+import NSSCore
 import NSSUI
 import SwiftUI
 
@@ -19,7 +20,7 @@ struct NotScreenStudioApp: App {
         .menuBarExtraStyle(.window)
 
         Window("notscreenstudio", id: "editor") {
-            EditorWindowContent(model: app.shell)
+            EditorWindowContent(model: app.shell, dependencies: app.editorDependencies)
         }
 
         Window("Permissions", id: "permissions") {
@@ -49,16 +50,15 @@ struct MenuBarLabel: View {
     }
 }
 
-/// Editor window. The real `EditorView` takes no project yet, so the saved recording's name is shown above it.
+/// Editor window: opens the project that was just recorded, or an empty state before any recording.
 struct EditorWindowContent: View {
     var model: ShellModel
+    var dependencies: EditorDependencies
 
     var body: some View {
-        VStack(spacing: 0) {
-            if let saved = model.lastSaved {
-                Text(saved.project.name).font(.headline).padding(.top, 8)
-                Text(saved.reference.url.path).font(.caption).foregroundStyle(.secondary).padding(.bottom, 8)
-            }
+        if let saved = model.lastSaved {
+            EditorView(reference: saved.reference, dependencies: dependencies)
+        } else {
             EditorView()
         }
     }

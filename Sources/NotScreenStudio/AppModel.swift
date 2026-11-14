@@ -18,11 +18,18 @@ final class AppModel {
     @ObservationIgnored let recordingSession: any RecordingSession = ScreenCaptureRecordingSession()
     @ObservationIgnored let inputLogger: any InputLogger = SystemInputLogger()
     @ObservationIgnored let projectStore: any ProjectStore
-    @ObservationIgnored let motionFactory: MotionModelFactory = LinearMotionModel.factory
+    @ObservationIgnored let motionFactory: MotionModelFactory = SpringMotionModel.factory
     @ObservationIgnored let renderer: any FrameRenderer = PassthroughRenderer()
     @ObservationIgnored let exporter: any Exporter
 
     let shell: ShellModel
+
+    /// What the editor window needs, built from the services above.
+    var editorDependencies: EditorDependencies {
+        EditorDependencies(
+            store: projectStore, motionFactory: motionFactory, renderer: renderer, exporter: exporter,
+            motionFactoryForAspect: { SpringMotionModel.factory(sourceAspect: $0) })
+    }
 
     init() {
         NSApplication.shared.setActivationPolicy(.accessory)
