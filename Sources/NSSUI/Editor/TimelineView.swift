@@ -202,8 +202,19 @@ struct EditorTimelineView: View {
     // MARK: Playhead
 
     private func playhead(_ g: TimelineGeometry) -> some View {
-        let x = g.x(for: model.displayPlayhead)
-        return ZStack(alignment: .top) {
+        PlayheadLine(model: model, geometry: g)
+    }
+}
+
+/// The drawn playhead. The only reader of `displayPlayhead`, so its per-frame changes invalidate just this
+/// small view and not the ruler, strip, markers or zoom track.
+private struct PlayheadLine: View {
+    let model: EditorModel
+    let geometry: TimelineGeometry
+
+    var body: some View {
+        let x = geometry.x(for: model.displayPlayhead)
+        ZStack(alignment: .top) {
             Rectangle().fill(Color.red).frame(width: 1.5)
             Image(systemName: "arrowtriangle.down.fill").font(.system(size: 9)).foregroundStyle(.red).offset(y: -1)
         }

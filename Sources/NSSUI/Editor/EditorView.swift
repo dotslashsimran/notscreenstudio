@@ -129,8 +129,7 @@ struct EditorContent: View {
             .keyboardShortcut(.space, modifiers: []).help("Play / pause")
             Button { engine.step(frames: 1) } label: { Image(systemName: "forward.frame.fill") }
                 .keyboardShortcut(.rightArrow, modifiers: []).help("Next frame")
-            Text("\(TimelineGeometry.label(for: model.playhead)) / \(TimelineGeometry.label(for: model.duration))")
-                .font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary)
+            TimeLabel(model: model)
         }
         .buttonStyle(.borderless)
     }
@@ -159,4 +158,13 @@ struct EditorContent: View {
 
 extension ExportModel: Identifiable {
     public nonisolated var id: ObjectIdentifier { ObjectIdentifier(self) }
+}
+
+/// "current / total" time. The only reader of `playhead` in the transport, so playback ticks don't re-evaluate `EditorContent`.
+private struct TimeLabel: View {
+    let model: EditorModel
+    var body: some View {
+        Text("\(TimelineGeometry.label(for: model.playhead)) / \(TimelineGeometry.label(for: model.duration))")
+            .font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary)
+    }
 }
