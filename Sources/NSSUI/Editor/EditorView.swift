@@ -13,7 +13,7 @@ extension EditorDependencies {
             store: FileProjectStore(),
             motionFactory: SpringMotionModel.factory,
             renderer: renderer,
-            exporter: StubExporter(motionFactory: SpringMotionModel.factory, renderer: renderer),
+            exporter: MP4Exporter(motionFactory: SpringMotionModel.factory, renderer: renderer),
             motionFactoryForAspect: { SpringMotionModel.factory(sourceAspect: $0) }
         )
     }

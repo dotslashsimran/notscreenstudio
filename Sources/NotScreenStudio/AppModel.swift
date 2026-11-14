@@ -45,7 +45,7 @@ final class AppModel {
             renderer = PassthroughRenderer()
             rendererError = "The GPU renderer failed to start (\(error)). Previews and exports will show only the background."
         }
-        exporter = StubExporter(motionFactory: motionFactory, renderer: renderer)
+        exporter = MP4Exporter(motionFactory: motionFactory, renderer: renderer)
         shell = ShellModel(
             services: ShellServices(
                 session: recordingSession,
