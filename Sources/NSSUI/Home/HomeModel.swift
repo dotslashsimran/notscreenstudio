@@ -27,10 +27,16 @@ public final class HomeModel {
     public func reload() async {
         do {
             let list = try await library.summaries()
+            let before = Dictionary(items.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
             items = list
             state = .loaded
             let alive = Set(list.map(\.id))
-            thumbnails = thumbnails.filter { alive.contains($0.key) }
+            // Prune deleted projects. A project whose bundle changed (new thumbnail file, new duration, rename)
+            // forgets its failure, and a cached image for a different file, so its tile loads again.
+            let changed = Set(list.filter { before[$0.id] != nil && before[$0.id] != $0 }.map(\.id))
+            failedThumbnails = failedThumbnails.filter { alive.contains($0) && !changed.contains($0) }
+            let byID = Dictionary(list.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+            thumbnails = thumbnails.filter { id, _ in alive.contains(id) && before[id]?.thumbnailURL == byID[id]?.thumbnailURL }
         } catch {
             state = .failed(error.localizedDescription)
         }
@@ -69,6 +75,7 @@ public final class HomeModel {
             try await library.delete(summary)
             items.removeAll { $0.id == summary.id }
             thumbnails[summary.id] = nil
+            failedThumbnails.remove(summary.id)
         } catch {
             actionError = "Couldn't delete: \(error.localizedDescription)"
         }

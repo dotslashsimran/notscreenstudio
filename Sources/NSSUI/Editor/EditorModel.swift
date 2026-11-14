@@ -54,7 +54,9 @@ public final class EditorModel {
     /// jumps (see `PlayheadEasing`). Advanced by the preview's display link.
     public private(set) var displayPlayhead: MediaTime = 0
     /// True while the user drags the playhead; the drawn playhead then follows the mouse with no easing.
-    public var isScrubbing = false
+    public private(set) var isScrubbing = false
+    /// Set when `saveNow()` fails, so the view can show it instead of swallowing it.
+    public var saveError: String?
     public var isPlaying = false
     public var selectedZoomID: UUID?
     /// When set, the next click in the preview picks the manual focus for this zoom block.
@@ -63,6 +65,8 @@ public final class EditorModel {
     public private(set) var revision = 0
 
     @ObservationIgnored private var easing = PlayheadEasing()
+    /// The project as last written (or loaded). `saveNow()` skips the write when nothing differs from it.
+    @ObservationIgnored private var savedSnapshot: Project
     @ObservationIgnored public var changeHandler: ((EditorChange) -> Void)?
     @ObservationIgnored private var gestureBase: Project?
     @ObservationIgnored private var gestureName = ""
@@ -73,6 +77,7 @@ public final class EditorModel {
 
     public init(project: Project, reference: ProjectReference, track: CursorTrack, dependencies: EditorDependencies) {
         self.project = project
+        self.savedSnapshot = project
         self.reference = reference
         self.track = track
         self.dependencies = dependencies
@@ -263,6 +268,25 @@ public final class EditorModel {
 
     public func seek(to t: MediaTime) {
         playhead = TrimEditing.clamp(t, to: trim, duration: duration)
+    }
+
+    /// Playhead drag: seeks and makes the drawn playhead follow the pointer exactly.
+    public func scrub(to t: MediaTime) {
+        isScrubbing = true
+        seek(to: t)
+    }
+
+    /// Ends a playhead drag. Must also run when the drag is cancelled (no `onEnded`), or the playhead stays stuck to `playhead`.
+    public func endScrub() { isScrubbing = false }
+
+    /// Writes the project now unless it is unchanged since it was loaded or last saved. Returns whether a write happened.
+    @discardableResult
+    public func saveNow() async throws -> Bool {
+        let snapshot = project
+        guard snapshot != savedSnapshot else { return false }
+        try await dependencies.store.save(snapshot, to: reference)
+        savedSnapshot = snapshot
+        return true
     }
 
     /// Advances the drawn playhead by one display frame. Called from the display link with the frame interval.

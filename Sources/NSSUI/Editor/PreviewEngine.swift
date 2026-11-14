@@ -46,6 +46,8 @@ public final class PreviewEngine {
     private var motionPending = false
     /// Number of motion builds started (diagnostics / tests).
     private(set) var motionBuildCount = 0
+    /// True when no motion build is running or queued, so `tick` renders with the model for the latest timeline.
+    var motionIsCurrent: Bool { !motionBuilding && !motionPending }
     /// Last playhead the players were seeked to (paused playhead edits must match it).
     private(set) var lastSeekTarget: MediaTime = 0
     private var tickCount = 0

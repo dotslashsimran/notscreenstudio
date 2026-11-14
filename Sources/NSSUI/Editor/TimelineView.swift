@@ -8,6 +8,8 @@ struct EditorTimelineView: View {
     let seek: (MediaTime) -> Void
 
     @State private var blockDragBase: [ZoomBlock]?
+    /// Resets to false when a drag ends OR is cancelled (system interruption), unlike `onEnded`.
+    @GestureState private var scrubbing = false
     private let space = "timelineTrack"
     private let rulerH: CGFloat = 22
     private let stripH: CGFloat = 48
@@ -33,6 +35,8 @@ struct EditorTimelineView: View {
         .focusable()
         .onKeyPress(.delete) { deleteSelected() }
         .onKeyPress(.deleteForward) { deleteSelected() }
+        .onChange(of: scrubbing) { _, now in if !now { model.endScrub() } }
+        .onDisappear { model.endScrub() }
     }
 
     private func deleteSelected() -> KeyPress.Result {
@@ -65,11 +69,12 @@ struct EditorTimelineView: View {
     /// Click or drag on the ruler or strip: seeks at once and the drawn playhead follows the mouse exactly.
     private func scrubGesture(_ g: TimelineGeometry) -> some Gesture {
         DragGesture(minimumDistance: 0, coordinateSpace: .named(space))
+            .updating($scrubbing) { _, state, _ in state = true }
             .onChanged {
-                model.isScrubbing = true
+                model.scrub(to: g.time(forX: $0.location.x))
                 seek(g.time(forX: $0.location.x))
             }
-            .onEnded { _ in model.isScrubbing = false }
+            .onEnded { _ in model.endScrub() }
     }
 
     // MARK: Thumbnails + trim

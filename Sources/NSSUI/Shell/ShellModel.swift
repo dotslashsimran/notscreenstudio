@@ -242,8 +242,9 @@ public final class ShellModel {
             let sourceRect = SourceLocator.appKitRect(
                 for: source, displays: listing.displays, windows: listing.windows, primaryHeight: effects.primaryScreenHeight)
             active = ActiveRecording(reference: ref, source: source, sourceRect: sourceRect, cameraDeviceID: camID, name: name)
-            // The camera bubble is shown before capture is prepared, so the capture filter is built with every
-            // window of this app already on screen (and the user can see themselves during the countdown).
+            // `begin` runs the whole start sequence: preflight, then the camera bubble, then the countdown with
+            // capture warming up in parallel, and capture starts as the countdown ends. It throws
+            // `StartCancelled` if the user cancels during the countdown.
             try await begin(options: options, into: ref.url, countdown: seconds, over: sourceRect)
 
             let startedAt = now()

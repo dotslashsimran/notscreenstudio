@@ -52,3 +52,35 @@ private func summary(_ name: String, at t: Double, thumb: URL? = nil) -> Project
         #expect(HomeModel.durationLabel(3725) == "1:02:05")
     }
 }
+
+/// A library whose list the test controls, so a bundle can "change" between reloads.
+private actor ScriptedLibrary: ProjectLibrary {
+    var items: [ProjectSummary]
+    init(_ items: [ProjectSummary]) { self.items = items }
+    func set(_ items: [ProjectSummary]) { self.items = items }
+    func summaries() async throws -> [ProjectSummary] { items }
+    func thumbnailURL(for summary: ProjectSummary) async -> URL? { items.first { $0.id == summary.id }?.thumbnailURL }
+    func delete(_ summary: ProjectSummary) async throws {}
+    func rename(_ summary: ProjectSummary, to name: String) async throws {}
+}
+
+@MainActor @Suite struct HomeThumbnailRetryTests {
+    @Test func failuresArePrunedWhenDeletedAndClearedWhenTheBundleChanges() async {
+        let a = summary("a", at: 2), b = summary("b", at: 1)
+        let lib = ScriptedLibrary([a, b])
+        let m = HomeModel(library: lib)
+        await m.reload()
+        await m.loadThumbnail(for: a)
+        await m.loadThumbnail(for: b)
+        #expect(m.failedThumbnails == [a.id, b.id])
+
+        await m.reload()                                   // nothing changed: still failed, not retried
+        #expect(m.failedThumbnails == [a.id, b.id])
+
+        var a2 = a
+        a2.thumbnailURL = URL(fileURLWithPath: "/tmp/new-thumb.jpg")   // the bundle changed
+        await lib.set([a2])                                // and b was deleted behind our back
+        await m.reload()
+        #expect(m.failedThumbnails.isEmpty)                // a will retry, b is pruned
+    }
+}

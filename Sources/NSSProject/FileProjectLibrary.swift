@@ -157,7 +157,8 @@ public actor FileProjectLibrary: ProjectLibrary {
         for file in [ProjectReference.projectFileName, FileProjectStore.backupFileName] {
             guard let data = try? Data(contentsOf: bundle.appendingPathComponent(file)),
                   let migrated = try? migrator.migrate(data),
-                  let project = try? JSONDecoder().decode(Project.self, from: migrated)
+                  let project = try? JSONDecoder().decode(Project.self, from: migrated),
+                  project.assets.unsafeFileName == nil
             else { continue }
             return project
         }

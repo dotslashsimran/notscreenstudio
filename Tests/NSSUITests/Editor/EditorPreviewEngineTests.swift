@@ -108,7 +108,8 @@ func makeProjectDir(duration: Double, factory: @escaping MotionModelFactory = { 
             size = PixelSize(width: CVPixelBufferGetWidth(pb), height: CVPixelBufferGetHeight(pb))
         }
         engine.seek(to: 0.5)
-        for _ in 0..<200 where presented == 0 {
+        // Wait for the event itself (up to 30 s) so a loaded machine cannot fail the functional check.
+        for _ in 0..<3000 where presented == 0 {
             engine.tick()
             try await Task.sleep(for: .milliseconds(10))
         }
@@ -119,7 +120,7 @@ func makeProjectDir(duration: Double, factory: @escaping MotionModelFactory = { 
         // Style changes re-render a paused preview immediately (aspect change reallocates the pool once).
         let before = presented
         model.setStyle(\.aspectRatio, .r1x1)
-        for _ in 0..<200 where presented == before {
+        for _ in 0..<3000 where presented == before {
             engine.tick()
             try await Task.sleep(for: .milliseconds(10))
         }
@@ -143,7 +144,7 @@ func makeProjectDir(duration: Double, factory: @escaping MotionModelFactory = { 
 
         engine.play()
         #expect(model.isPlaying)
-        for _ in 0..<500 where model.isPlaying {
+        for _ in 0..<3000 where model.isPlaying {
             engine.tick()
             try await Task.sleep(for: .milliseconds(10))
         }

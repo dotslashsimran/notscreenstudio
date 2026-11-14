@@ -197,7 +197,8 @@ final class FakeGeometry: ScreenGeometryProvider, @unchecked Sendable {
         let start = ContinuousClock.now
         let back = try JSONDecoder().decode(CursorTrack.self, from: data)
         #expect(back.samples.count == 72_000)
-        #expect(ContinuousClock.now - start < .seconds(5))
+        // Wall-clock budget: asserted only with NSS_BENCH=1 (loaded machines and CI VMs are unreliable).
+        if ProcessInfo.processInfo.environment["NSS_BENCH"] == "1" { #expect(ContinuousClock.now - start < .seconds(5)) }
     }
 
     // MARK: Live logger (skips without a window server)

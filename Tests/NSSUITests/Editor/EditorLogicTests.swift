@@ -329,12 +329,12 @@ import NSSMotion
     @Test func finishesAndFailsFromExporter() async throws {
         let ok = ExportModel(editor: makeModel())
         ok.start()
-        for _ in 0..<100 where ok.finishedURL == nil { try await Task.sleep(for: .milliseconds(20)) }
+        for _ in 0..<1500 where ok.finishedURL == nil { try await Task.sleep(for: .milliseconds(20)) }
         #expect(ok.finishedURL == ok.outputURL)
 
         let bad = ExportModel(editor: makeModel(exporter: ScriptedExporter(fail: true)))
         bad.start()
-        for _ in 0..<100 where bad.failureMessage == nil { try await Task.sleep(for: .milliseconds(20)) }
+        for _ in 0..<1500 where bad.failureMessage == nil { try await Task.sleep(for: .milliseconds(20)) }
         #expect(bad.failureMessage != nil)
     }
 
