@@ -19,7 +19,7 @@ final class AppModel {
     @ObservationIgnored let inputLogger: any InputLogger = SystemInputLogger()
     @ObservationIgnored let projectStore: any ProjectStore
     @ObservationIgnored let motionFactory: MotionModelFactory = SpringMotionModel.factory
-    @ObservationIgnored let renderer: any FrameRenderer = PassthroughRenderer()
+    @ObservationIgnored let renderer: any FrameRenderer
     @ObservationIgnored let exporter: any Exporter
 
     let shell: ShellModel
@@ -36,6 +36,15 @@ final class AppModel {
         let store = FileProjectStore()
         store.installTerminationFlush()
         projectStore = store
+        // Metal renderer (falls back to the CPU passthrough only when there is no Metal device). Any other
+        // setup failure is shown to the user instead of silently producing flat frames.
+        var rendererError: String?
+        do {
+            renderer = try MetalRenderer.makeDefault()
+        } catch {
+            renderer = PassthroughRenderer()
+            rendererError = "The GPU renderer failed to start (\(error)). Previews and exports will show only the background."
+        }
         exporter = StubExporter(motionFactory: motionFactory, renderer: renderer)
         shell = ShellModel(
             services: ShellServices(
@@ -45,5 +54,6 @@ final class AppModel {
                 sources: SystemSourceProvider(),
                 permissions: SystemPermissions()),
             effects: AppKitShellEffects())
+        if let rendererError { shell.showNotice(rendererError) }
     }
 }

@@ -167,6 +167,8 @@ public final class ShellModel {
     public func requestEditor() { if lastSaved != nil { editorRequestID += 1 } }
     public func dismissError() { apply(.dismissError) }
     public func dismissNotice() { notice = nil }
+    /// Shows a non-fatal message in the menu, for example a setup problem found at launch.
+    public func showNotice(_ text: String) { notice = text }
 
     // MARK: Recording
 
@@ -359,7 +361,8 @@ public final class ShellModel {
         let bubble = captureBubble(for: active)
         hideOverlays()
         self.active = nil
-        apply(.captureFailed(message))
+        // The phase changes only after the session is stopped and saved, so `canStart` stays false until then.
+        defer { apply(.captureFailed(message)) }
         do {
             let saved = try await finish(active, bubble: bubble)
             notice = "Recording stopped early. The partial recording was saved as \(saved.project.name)."
