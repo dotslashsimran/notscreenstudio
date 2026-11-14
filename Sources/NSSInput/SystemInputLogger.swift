@@ -23,8 +23,10 @@ public actor SystemInputLogger: InputLogger {
     private let monitorClicks: Bool
     private var recorder: CursorRecorder?
     private var timer: DispatchSourceTimer?
+    private var refreshTimer: DispatchSourceTimer?
     private var monitors: ClickMonitors?
     private let queue = DispatchQueue(label: "notscreenstudio.input.sampler", qos: .userInteractive)
+    private let refreshQueue = DispatchQueue(label: "notscreenstudio.input.geometry", qos: .utility)
 
     public init(
         sampleRate: Double = 120,
@@ -52,7 +54,13 @@ public actor SystemInputLogger: InputLogger {
 
         if monitorClicks {
             let primaryHeight = geometry.primaryDisplayHeight
-            monitors = await MainActor.run { ClickMonitors(recorder: recorder, primaryHeight: primaryHeight) }
+            let installed = await MainActor.run { ClickMonitors(recorder: recorder, primaryHeight: primaryHeight) }
+            // `stop` (or another `start`) may have run while we were suspended. Do not leave monitors behind.
+            guard self.recorder === recorder else {
+                await MainActor.run { installed.remove() }
+                throw CancellationError()
+            }
+            monitors = installed
         }
 
         recorder.tick()  // position at t ~ 0 without waiting a full period
@@ -65,16 +73,28 @@ public actor SystemInputLogger: InputLogger {
         timer.setEventHandler { recorder.tick() }
         timer.resume()
         self.timer = timer
+
+        // Window frames are looked up on their own low-rate queue so they cannot add jitter to sampling.
+        let refresh = DispatchSource.makeTimerSource(queue: refreshQueue)
+        refresh.schedule(deadline: .now() + recorder.refreshInterval, repeating: recorder.refreshInterval)
+        refresh.setEventHandler { recorder.refreshRect() }
+        refresh.resume()
+        refreshTimer = refresh
     }
 
     public func stop(recordingStartHostTime: Double) async -> CursorTrack {
+        // Tear down synchronously (before any suspension) so a concurrent `start` sees a consistent state.
         timer?.cancel()
         timer = nil
+        refreshTimer?.cancel()
+        refreshTimer = nil
+        let monitors = self.monitors
+        self.monitors = nil
+        let recorder = self.recorder
+        self.recorder = nil
         if let monitors {
             await MainActor.run { monitors.remove() }
         }
-        monitors = nil
-        defer { recorder = nil }
         guard let recorder else { return .empty }
         return recorder.finish(recordingStartHostTime: recordingStartHostTime, sampleRate: schedule.rate)
     }

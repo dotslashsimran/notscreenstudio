@@ -145,15 +145,16 @@ final class FakeGeometry: ScreenGeometryProvider, @unchecked Sendable {
             source: .window(id: 7), geometry: geo, schedule: SamplingSchedule(rate: 120),
             position: { CGPoint(x: 150, y: 50) }, clock: { time.withLock { $0 } })
         rec.tick()
-        // Window moves 100 pt right; the frame is re-read within a few ticks (every 4 at 120 Hz).
+        // Window moves 100 pt right. Ticks use the cached frame until the separate refresh runs.
         geo.rect.withLock { $0 = CGRect(x: 100, y: 0, width: 200, height: 100) }
-        for i in 1...8 {
-            time.withLock { $0 = 1 + Double(i) / 120 }
-            rec.tick()
-        }
+        time.withLock { $0 = 1 + 1.0 / 120 }
+        rec.tick()
+        rec.refreshRect()
+        time.withLock { $0 = 1 + 2.0 / 120 }
+        rec.tick()
         let track = rec.finish(recordingStartHostTime: 0, sampleRate: 120)
-        #expect(track.samples.first?.x == 0.75)
-        #expect(track.samples.last?.x == 0.25)
+        #expect(track.samples.map(\.x) == [0.75, 0.75, 0.25])
+        #expect(rec.refreshInterval == 1.0 / 30)
     }
 
     @Test func recorderKeepsLastRectWhenWindowDisappears() {
@@ -162,8 +163,20 @@ final class FakeGeometry: ScreenGeometryProvider, @unchecked Sendable {
             source: .window(id: 7), geometry: geo, schedule: SamplingSchedule(rate: 120),
             position: { CGPoint(x: 50, y: 50) }, clock: { 1 })
         geo.rect.withLock { $0 = nil }
+        rec.refreshRect()
         for _ in 0..<10 { rec.tick() }
         #expect(rec.sampleCount() == 10)
+    }
+
+    @Test func stopRightAfterStartLeavesNothingRunning() async throws {
+        let logger = SystemInputLogger(geometry: FakeGeometry(rect: CGRect(x: 0, y: 0, width: 100, height: 100)), monitorClicks: false)
+        try await logger.start(source: .display(id: 1))
+        let t = await logger.stop(recordingStartHostTime: 0)
+        #expect(!t.samples.isEmpty)
+        #expect(await logger.stop(recordingStartHostTime: 0) == .empty)
+        // Can start again after a stop.
+        try await logger.start(source: .display(id: 1))
+        _ = await logger.stop(recordingStartHostTime: 0)
     }
 
     @Test func recorderSkipsTicksWithoutAPosition() {

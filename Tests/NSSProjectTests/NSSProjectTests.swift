@@ -205,11 +205,13 @@ func settle(_ check: () -> Bool) async {
         #expect(try current.migrate(data) == data)
 
         obj["schemaVersion"] = Project.currentSchemaVersion + 1
-        #expect(throws: NSSError.self) { try current.migrate(JSONSerialization.data(withJSONObject: obj)) }
+        #expect(throws: ProjectMigrationError.newerSchema(found: Project.currentSchemaVersion + 1, supported: Project.currentSchemaVersion)) {
+            try current.migrate(JSONSerialization.data(withJSONObject: obj))
+        }
 
         let gap = ProjectMigrator(currentVersion: 3, steps: [:])
         obj["schemaVersion"] = 1
-        #expect(throws: NSSError.self) { try gap.migrate(JSONSerialization.data(withJSONObject: obj)) }
+        #expect(throws: ProjectMigrationError.noMigration(from: 1)) { try gap.migrate(JSONSerialization.data(withJSONObject: obj)) }
     }
 
     @Test func storeLoadAppliesMigration() async throws {

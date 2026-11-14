@@ -58,16 +58,23 @@ public final class AutosaveDebouncer: Sendable {
     public func schedule(_ project: Project, to ref: ProjectReference) {
         let generation = counter.withLock { $0 += 1; return $0 }
         let key = ref.url.standardizedFileURL
+        // Store the entry first, so `cancel`/`flush` can see it before its timer task exists.
+        let old = state.withLock { s -> Task<Void, Never>? in
+            let previous = s[key]?.task
+            s[key] = Pending(project: project, generation: generation, task: nil)
+            return previous
+        }
+        old?.cancel()
         let task = Task { [delay, clock] in
             do { try await clock.sleep(for: delay) } catch { return }
             self.fire(key: key, ref: ref, generation: generation)
         }
-        let old = state.withLock { s -> Task<Void, Never>? in
-            let previous = s[key]?.task
-            s[key] = Pending(project: project, generation: generation, task: task)
-            return previous
+        let attached = state.withLock { s -> Bool in
+            guard s[key]?.generation == generation else { return false }
+            s[key]?.task = task
+            return true
         }
-        old?.cancel()
+        if !attached { task.cancel() }
     }
 
     /// Drops the pending save for `ref`, for example because an explicit save just superseded it.

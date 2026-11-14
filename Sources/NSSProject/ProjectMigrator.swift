@@ -1,6 +1,21 @@
 import Foundation
 import NSSCore
 
+/// Why a project could not be migrated. Typed so callers never match on message text.
+public enum ProjectMigrationError: Error, Sendable, Equatable, CustomStringConvertible {
+    case newerSchema(found: Int, supported: Int)
+    case noMigration(from: Int)
+
+    public var description: String {
+        switch self {
+        case .newerSchema(let found, let supported):
+            return "Project was saved by a newer version (schema \(found), this app reads \(supported))"
+        case .noMigration(let from):
+            return "No migration from schema \(from)"
+        }
+    }
+}
+
 /// Upgrades an old `project.json` to the current schema before it is decoded.
 /// A migration step turns version N JSON into version N+1 JSON. Steps are registered by their source version.
 public struct ProjectMigrator: Sendable {
@@ -26,11 +41,11 @@ public struct ProjectMigrator: Sendable {
         var version = (json["schemaVersion"] as? Int) ?? 1
         if version == currentVersion { return data }
         guard version < currentVersion else {
-            throw NSSError.invalidProject("Project was saved by a newer version (schema \(version), this app reads \(currentVersion))")
+            throw ProjectMigrationError.newerSchema(found: version, supported: currentVersion)
         }
         while version < currentVersion {
             guard let step = steps[version] else {
-                throw NSSError.invalidProject("No migration from schema \(version)")
+                throw ProjectMigrationError.noMigration(from: version)
             }
             try step(&json)
             version += 1

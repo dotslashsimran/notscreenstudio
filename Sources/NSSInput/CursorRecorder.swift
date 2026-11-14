@@ -13,14 +13,12 @@ final class CursorRecorder: Sendable {
         var samples: [CursorSample] = []
         var clicks: [ClickEvent] = []
         var rect: CGRect?
-        var ticks = 0
     }
 
     private let source: CaptureSource
     private let geometry: any ScreenGeometryProvider
     private let position: PositionProvider
     private let clock: Clock
-    private let refreshEvery: Int
     private let state: OSAllocatedUnfairLock<State>
 
     /// - Parameter position: current cursor location in global top-left points.
@@ -36,24 +34,25 @@ final class CursorRecorder: Sendable {
         self.geometry = geometry
         self.position = position
         self.clock = clock
-        // A window can move, so re-read its frame about 30 times a second. Displays and areas only change on
-        // reconfiguration, so once a second is plenty.
-        self.refreshEvery = geometry.isDynamic(source) ? max(1, Int((schedule.rate / 30).rounded())) : max(1, Int(schedule.rate.rounded()))
         var initial = State()
         initial.samples.reserveCapacity(Int(schedule.rate) * 60 * 10)
         initial.rect = geometry.globalRect(for: source)
         self.state = OSAllocatedUnfairLock(initialState: initial)
     }
 
-    /// Takes one sample. Does no allocation except the occasional amortized array growth.
+    /// How often the source frame should be re-read, on its own queue (never the sampling queue):
+    /// a window can move, so about 30 times a second; displays and areas only change on reconfiguration.
+    var refreshInterval: Double { geometry.isDynamic(source) ? 1.0 / 30 : 1 }
+
+    /// Re-reads the source frame (may call CoreGraphics window lookups). Keeps the last frame when the
+    /// source cannot be resolved, for example a window that just closed.
+    func refreshRect() {
+        if let r = geometry.globalRect(for: source) { state.withLock { $0.rect = r } }
+    }
+
+    /// Takes one sample from the cached frame. Does no system geometry lookups and no allocation except
+    /// the occasional amortized array growth.
     func tick() {
-        let due = state.withLock { s -> Bool in
-            s.ticks += 1
-            return s.rect == nil || s.ticks % refreshEvery == 0
-        }
-        if due, let r = geometry.globalRect(for: source) {
-            state.withLock { $0.rect = r }
-        }
         let now = clock()
         guard let p = position() else { return }
         state.withLock { s in

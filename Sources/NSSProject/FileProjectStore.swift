@@ -99,7 +99,7 @@ public actor FileProjectStore: ProjectStore {
             project = try readProject(at: primary)
         } catch let primaryError {
             // A newer-schema file must not be silently replaced by an older backup.
-            if Self.isNewerSchema(primaryError) { throw primaryError }
+            if primaryError is ProjectMigrationError { throw NSSError.invalidProject("\(primaryError)") }
             guard let recovered = try? readProject(at: backup) else { throw primaryError }
             project = recovered
         }
@@ -120,11 +120,6 @@ public actor FileProjectStore: ProjectStore {
         } catch {
             throw NSSError.invalidProject("Corrupt \(url.lastPathComponent): \(error.localizedDescription)")
         }
-    }
-
-    private static func isNewerSchema(_ error: Error) -> Bool {
-        if case .invalidProject(let m) = error as? NSSError { return m.contains("newer version") }
-        return false
     }
 
     public func save(_ project: Project, to ref: ProjectReference) async throws {
