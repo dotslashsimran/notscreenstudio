@@ -25,7 +25,9 @@ Note: every time you rebuild with `bundle.sh` the app is signed ad hoc again, so
 ## 3. Record
 
 6. Choose your main display. Turn on the microphone and the camera in the menu. Click Record.
-   - Good: a small recording bar with a running timer appears. A camera bubble shows your face over the screen. Recording starts at once, with no extra dialog.
+   - Good: a big 3, 2, 1 countdown shows first (3 seconds by default), then a small recording bar with a running timer appears. A camera bubble shows your face over the screen. No extra dialog.
+   - Good: the countdown, the recording bar and the camera bubble never appear in the finished recording (check this in step 10a below).
+   - Also try: press Escape or Stop during the countdown. Good: nothing is recorded and no project is created. Set the countdown to 0 if the menu offers it. Good: recording starts at once.
 7. Move the mouse around, click a few different places in different corners of the screen (wait about one second between clicks), and speak a sentence.
    - Good: nothing lags and the screen stays smooth.
 8. While recording, drag the camera bubble to another corner and make it larger or smaller if you can.
@@ -33,7 +35,9 @@ Note: every time you rebuild with `bundle.sh` the app is signed ad hoc again, so
 9. Stop with the Stop button on the recording bar (or the global stop shortcut shown in the menu).
    - Good: the editor window opens by itself within a few seconds, showing your recording.
 10. In Finder open `~/Movies/notscreenstudio/` and right-click the newest `.nssproj` folder, then Show Package Contents.
-    - Good: it holds `project.json`, `screen.mov`, `camera.mov`, `mic.m4a` and `cursor.json`. `cursor.json` is more than a few kilobytes.
+    - Good: it holds `project.json`, `screen.mov`, `camera.mov`, `mic.m4a` and `cursor.json`. `cursor.json` is more than a few kilobytes. A `thumbnail.jpg` appears a moment after the editor opens.
+10a. Play the recording in the editor and step through the first and last seconds.
+    - Good: no recording bar, no countdown and no camera bubble overlay are baked into the screen video. The camera bubble you see is the one drawn by the editor, and it follows your Camera settings.
 11. Record again, this time choosing a single window as the source. Drag that window around while recording, click inside it, then stop.
     - Good: the editor shows only that window. In the editor the cursor stays on the right spot inside the window even though the window moved.
 12. Record again, this time choosing Area and dragging a rectangle over part of the screen. Click inside the area, then stop.
@@ -57,12 +61,29 @@ Open each recording in the editor and check the following.
     - Good: the preview updates at once, with no flicker. A gradient shows no visible banding.
 19. Rounded corners and shadow: raise Corner radius, Shadow blur and Shadow opacity in the inspector, and change Padding.
     - Good: the screen has rounded corners, a soft shadow sits under it, and more padding shrinks the screen inside the frame.
-20. Camera bubble shapes: try circle, rounded rectangle, squircle and rectangle. Drag the bubble in the preview.
-    - Good: each shape draws cleanly with smooth edges, the bubble sits where you left it while recording (mapped over the same part of the screen), and it follows your drag.
+20. Camera bubble shapes: in the inspector pick Circle, Square, Tall and Wide in turn. Drag the bubble in the preview.
+    - Good: each shape draws cleanly with smooth edges (Tall is 3:4, Wide is 16:9), the bubble sits where you left it while recording (mapped over the same part of the screen), and it follows your drag. The shape in the preview matches the one in the recording overlay and in the export.
+20a. Roundness: with Square, Tall or Wide selected, drag the Roundness slider from left to right.
+    - Good: corners go from sharp to fully round (a circle for Square, a pill for Tall and Wide). With Circle selected the slider is greyed out. One Undo (Command Z) reverts the whole drag, not one tick of it.
+20b. Shrink when zoomed: set "Shrink when zoomed" to about 50%, then play over a click that zooms in.
+    - Good: the bubble smoothly gets smaller as the view zooms in and grows back when it zooms out. At 100% it never changes size. One Undo reverts the whole slider drag. Check the same in the export (step 25).
 21. Aspect ratio: switch between 16:9, 1:1 and 9:16.
     - Good: the preview changes shape. The screen stays centered and fits, the zoom still follows your clicks, and the camera bubble stays inside the picture.
 22. Trim and zoom blocks: drag the trim handles on the timeline to cut the start and end. Then add a zoom block, drag it, change its zoom level and pick its focus point in the preview.
     - Good: playback stays inside the trim. The new zoom block shows on the timeline and the preview zooms to the point you picked during that block. Undo and Redo (Command Z, Shift Command Z) revert each change.
+
+### Cursor, squish and playhead
+
+22a. Cursor shapes: record yourself moving over a text field (I-beam), a link or button (pointing hand), a window edge (resize arrows) and plain desktop (arrow), then open it in the editor.
+    - Good: the cursor in the editor changes to the matching shape at the same moments and is not always an arrow.
+22b. Press squish: hold the mouse button down for about a second on a click, then play it back.
+    - Good: the cursor shrinks a little while the button is held and springs back on release.
+22c. Playhead while playing: press Space and watch the red playhead on the timeline.
+    - Good: it glides smoothly, with no stepping. Pause and it stops where the picture is.
+22d. Playhead jumps: click a spot on the ruler, press Right Arrow and Left Arrow, and use Undo after a Trim.
+    - Good: the picture changes at once, and the red playhead glides there in about a fifth of a second. Pressing the arrow quickly several times keeps it gliding without jumping back.
+22e. Playhead drag: press and drag on the ruler or thumbnail strip.
+    - Good: the red playhead follows the mouse exactly, with no lag or easing, and the preview scrubs with it.
 
 ## 5. Export
 
@@ -76,6 +97,24 @@ Open each recording in the editor and check the following.
     - Good: sizes are 3840×2160, 2160×2160 and 2160×3840 for the three shapes. The file plays smoothly. It takes longer than 1080p, but the app stays responsive.
 27. Quit and reopen the app, then choose Open Last Recording in the menu.
     - Good: your edits (trim, style, zoom blocks) were saved automatically.
+
+## 5a. Home screen
+
+27a. Close the editor window, then open it from the menu bar icon (Open Last Recording), and click "Recordings" at the top left of the editor.
+    - Good: the home screen shows a grid of your recordings, newest first, each with a thumbnail, name, date and length. Older recordings get their thumbnails a moment after they scroll into view.
+27b. Click a recording. Then click "Recordings" to go back.
+    - Good: it opens in the editor. Going back returns to the grid with no delay, and your edits are kept.
+27c. Right-click a recording and choose Rename…, type a new name and confirm.
+    - Good: the name updates in the grid and stays after you quit and reopen the app.
+27d. Right-click a recording and choose Reveal in Finder.
+    - Good: Finder opens with that `.nssproj` folder selected.
+27e. Right-click a recording and choose Move to Trash, then confirm.
+    - Good: it disappears from the grid and is in the Trash (open Trash and use Put Back to restore it, then reopen Home to see it again).
+27f. Delete (or move away) every recording.
+    - Good: the home screen shows "No recordings yet" and a Record button. Click it.
+    - Good: recording starts (with the countdown), and when you stop, the editor opens the new recording.
+27g. With 30 or more recordings (copy one `.nssproj` folder several times in Finder), scroll the grid.
+    - Good: scrolling stays smooth and the app stays responsive while thumbnails fill in.
 
 ## 6. Quick regression check for the automated tests
 

@@ -16,6 +16,8 @@ public struct EditorDependencies: Sendable {
     public var motionFactory: MotionModelFactory
     public var renderer: any FrameRenderer
     public var exporter: any Exporter
+    /// Optional: when set, the editor makes the home-screen thumbnail for a project the first time it opens.
+    public var library: (any ProjectLibrary)?
 
     /// Optional: builds a factory for the real source aspect (width / height) of the recording. When set, the
     /// preview uses it instead of `motionFactory`, so auto-zoom framing is right for non-16:9 sources.
@@ -23,8 +25,10 @@ public struct EditorDependencies: Sendable {
 
     public init(
         store: any ProjectStore, motionFactory: @escaping MotionModelFactory, renderer: any FrameRenderer, exporter: any Exporter,
-        motionFactoryForAspect: (@Sendable (_ sourceAspect: Double) -> MotionModelFactory)? = nil
+        motionFactoryForAspect: (@Sendable (_ sourceAspect: Double) -> MotionModelFactory)? = nil,
+        library: (any ProjectLibrary)? = nil
     ) {
+        self.library = library
         self.motionFactoryForAspect = motionFactoryForAspect
         self.store = store
         self.motionFactory = motionFactory
@@ -46,6 +50,11 @@ public final class EditorModel {
 
     /// Playhead in seconds. Written by the preview / scrubbing, read by the timeline.
     public var playhead: MediaTime = 0
+    /// Where the playhead is drawn. Follows `playhead` exactly while playing or scrubbing and glides after
+    /// jumps (see `PlayheadEasing`). Advanced by the preview's display link.
+    public private(set) var displayPlayhead: MediaTime = 0
+    /// True while the user drags the playhead; the drawn playhead then follows the mouse with no easing.
+    public var isScrubbing = false
     public var isPlaying = false
     public var selectedZoomID: UUID?
     /// When set, the next click in the preview picks the manual focus for this zoom block.
@@ -53,6 +62,7 @@ public final class EditorModel {
     /// Bumped on every undo/redo-able change so menus can refresh.
     public private(set) var revision = 0
 
+    @ObservationIgnored private var easing = PlayheadEasing()
     @ObservationIgnored public var changeHandler: ((EditorChange) -> Void)?
     @ObservationIgnored private var gestureBase: Project?
     @ObservationIgnored private var gestureName = ""
@@ -253,6 +263,17 @@ public final class EditorModel {
 
     public func seek(to t: MediaTime) {
         playhead = TrimEditing.clamp(t, to: trim, duration: duration)
+    }
+
+    /// Advances the drawn playhead by one display frame. Called from the display link with the frame interval.
+    public func advanceDisplayPlayhead(dt: Double) {
+        if isPlaying || isScrubbing {
+            easing.snap(to: playhead)
+        } else {
+            easing.glide(to: playhead)
+            easing.advance(by: dt)
+        }
+        if easing.value != displayPlayhead { displayPlayhead = easing.value }
     }
 
     /// Frame time step in seconds for frame-stepping.

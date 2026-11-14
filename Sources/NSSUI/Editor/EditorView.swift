@@ -30,25 +30,32 @@ final class EditorSession {
 public struct EditorView: View {
     private let reference: ProjectReference?
     private let dependencies: EditorDependencies?
+    private let onBack: (() -> Void)?
     @State private var session: EditorSession?
     @State private var loadError: String?
 
     public init() {
         reference = nil
         dependencies = nil
+        onBack = nil
     }
 
-    public init(reference: ProjectReference, dependencies: EditorDependencies) {
+    /// `onBack` shows a "Recordings" button in the toolbar that returns to the home screen.
+    public init(reference: ProjectReference, dependencies: EditorDependencies, onBack: (() -> Void)? = nil) {
         self.reference = reference
         self.dependencies = dependencies
+        self.onBack = onBack
     }
 
     public var body: some View {
         Group {
             if let session {
-                EditorContent(session: session).id(ObjectIdentifier(session))
+                EditorContent(session: session, onBack: onBack).id(ObjectIdentifier(session))
             } else if let loadError {
-                ContentUnavailableView("Couldn't open project", systemImage: "exclamationmark.triangle", description: Text(loadError))
+                VStack(spacing: 12) {
+                    ContentUnavailableView("Couldn't open project", systemImage: "exclamationmark.triangle", description: Text(loadError))
+                    if let onBack { Button("Back to recordings", action: onBack) }
+                }
             } else if reference == nil {
                 ContentUnavailableView("No project open", systemImage: "film", description: Text("Record something or open a project to edit it."))
             } else {
@@ -66,6 +73,12 @@ public struct EditorView: View {
             let project = try await dependencies.store.load(reference)
             let track = try await dependencies.store.loadCursorTrack(for: reference, assets: project.assets)
             session?.close()
+            if let library = dependencies.library {
+                // Makes thumbnail.jpg for a fresh recording (cheap no-op when it exists), off the main thread.
+                let summary = ProjectSummary(id: project.id, name: project.name, createdAt: project.createdAt,
+                                             duration: project.assets.duration, bundle: reference)
+                Task.detached(priority: .utility) { _ = await library.thumbnailURL(for: summary) }
+            }
             session = EditorSession(model: EditorModel(project: project, reference: reference, track: track, dependencies: dependencies))
         } catch {
             loadError = error.localizedDescription
@@ -75,6 +88,7 @@ public struct EditorView: View {
 
 struct EditorContent: View {
     let session: EditorSession
+    var onBack: (() -> Void)?
     @State private var exportModel: ExportModel?
 
     private var model: EditorModel { session.model }
@@ -122,6 +136,17 @@ struct EditorContent: View {
     }
 
     @ToolbarContentBuilder private var toolbar: some ToolbarContent {
+        if let onBack {
+            ToolbarItem(placement: .navigation) {
+                Button {
+                    // Write pending edits now so the home screen (name, thumbnail) sees them.
+                    let project = model.project, ref = model.reference, store = model.dependencies.store
+                    Task { try? await store.save(project, to: ref) }
+                    onBack()
+                } label: { Label("Recordings", systemImage: "chevron.left") }
+                    .help("Back to all recordings")
+            }
+        }
         ToolbarItemGroup {
             Button { model.undo() } label: { Image(systemName: "arrow.uturn.backward") }
                 .disabled(!model.canUndo).keyboardShortcut("z", modifiers: .command).help("Undo")
