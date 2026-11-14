@@ -64,7 +64,7 @@ public struct TimeOrigin: Sendable, Equatable {
 
     /// True when a sample ends at or before the origin and so must be dropped.
     public func isEntirelyBefore(start: Double, duration: Double) -> Bool {
-        start + max(duration, 0) <= hostTime
+        duration > 0 ? start + duration <= hostTime : start < hostTime
     }
 
     public func duration(endingAt endHost: Double) -> MediaTime { max(0, endHost - hostTime) }
