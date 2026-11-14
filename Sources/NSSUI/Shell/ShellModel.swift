@@ -68,6 +68,8 @@ public final class ShellModel {
         var source: CaptureSource
         var sourceRect: CGRect?
         var cameraDeviceID: String?
+        /// Chosen once at start, so the bundle name, recents entry and project name always agree.
+        var name: String
     }
 
     public init(
@@ -191,19 +193,20 @@ public final class ShellModel {
 
             var micID: String?
             if settings.micEnabled {
-                if permissionStates[.microphone] == .denied { notes.append("Microphone skipped: permission denied.") }
+                if !(await deviceAllowed(.microphone)) { notes.append("Microphone skipped: permission denied.") }
                 else if let id = Self.pickDevice(preferred: settings.micDeviceID, from: microphones) { micID = id }
                 else { notes.append("Microphone skipped: none found.") }
             }
             var camID: String?
             if settings.cameraEnabled {
-                if permissionStates[.camera] == .denied { notes.append("Camera skipped: permission denied.") }
+                if !(await deviceAllowed(.camera)) { notes.append("Camera skipped: permission denied.") }
                 else if let id = Self.pickDevice(preferred: settings.cameraDeviceID, from: cameras) { camID = id }
                 else { notes.append("Camera skipped: none found.") }
             }
             notice = notes.isEmpty ? nil : notes.joined(separator: " ")
 
-            let ref = try await services.store.createProject(named: Self.projectName(for: now()))
+            let name = Self.projectName(for: now())
+            let ref = try await services.store.createProject(named: name)
             createdRef = ref
             // The logger starts first so no early movement is lost. `stop` rebases to the session's origin.
             try await services.inputLogger.start(source: source)
@@ -214,7 +217,7 @@ public final class ShellModel {
             let startedAt = now()
             let sourceRect = SourceLocator.appKitRect(
                 for: source, displays: listing.displays, windows: listing.windows, primaryHeight: effects.primaryScreenHeight)
-            active = ActiveRecording(reference: ref, source: source, sourceRect: sourceRect, cameraDeviceID: camID)
+            active = ActiveRecording(reference: ref, source: source, sourceRect: sourceRect, cameraDeviceID: camID, name: name)
             apply(.started(startedAt))
             showOverlays(startedAt: startedAt)
             watchSession()
@@ -238,20 +241,38 @@ public final class ShellModel {
             apply(.saved(saved.reference))
             editorRequestID += 1
         } catch {
-            _ = await services.inputLogger.stop(recordingStartHostTime: 0)
+            // `finish` already cleaned up for a failed stop (bundle removed) and kept the bundle for a failed save.
             apply(.saveFailed(Self.describe(error)))
         }
     }
 
+    /// True if the device's permission is granted. An undecided permission is asked for here, before the
+    /// session starts, so the system prompt never interrupts `session.start`. Declined or denied means skip the device.
+    private func deviceAllowed(_ kind: PermissionKind) async -> Bool {
+        var state = services.permissions.status(of: kind)
+        if state == .notDetermined { state = await services.permissions.request(kind) }
+        permissionStates[kind] = state
+        return state == .granted
+    }
+
     /// Stops the session (finalizing every file), stops the logger, and saves the project and cursor track.
     private func finish(_ active: ActiveRecording, bubble: (center: NormalizedPoint, size: Double)?) async throws -> SavedRecording {
-        let assets = try await services.session.stop()
+        let assets: RecordingAssets
+        do {
+            assets = try await services.session.stop()
+        } catch {
+            // The session deleted its own files, so the bundle is an empty shell. Do not leave a broken project behind.
+            _ = await services.inputLogger.stop(recordingStartHostTime: 0)
+            Self.removeBundle(active.reference, library: services.store.libraryURL)
+            throw error
+        }
+        // From here the finished recording exists: a failed save keeps the bundle.
         let track = await services.inputLogger.stop(recordingStartHostTime: assets.startHostTime)
         var style = Style()
         style.camera = Self.cameraBubble(
             hasCamera: assets.cameraFile != nil, shape: settings.cameraShape,
             geometry: bubble ?? (settings.bubbleCenter, settings.bubbleSize))
-        let project = Project(name: Self.projectName(for: now()), assets: assets, style: style)
+        let project = Project(name: active.name, assets: assets, style: style)
         try await services.store.saveCursorTrack(track, for: active.reference, assets: assets)
         try await services.store.save(project, to: active.reference)
         let saved = SavedRecording(reference: active.reference, project: project, cursorTrack: track)
@@ -343,8 +364,7 @@ public final class ShellModel {
             let saved = try await finish(active, bubble: bubble)
             notice = "Recording stopped early. The partial recording was saved as \(saved.project.name)."
         } catch {
-            _ = await services.inputLogger.stop(recordingStartHostTime: 0)
-            Self.removeBundle(active.reference, library: services.store.libraryURL)
+            // `finish` already removed the bundle if the session produced nothing.
         }
     }
 

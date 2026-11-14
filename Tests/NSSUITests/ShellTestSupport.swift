@@ -108,6 +108,7 @@ struct ShellRig {
         mics: [DeviceItem] = [DeviceItem(id: "mic1", name: "Mic", isDefault: true)],
         cams: [DeviceItem] = [DeviceItem(id: "cam1", name: "Cam", isDefault: true)],
         windows: [WindowItem] = [WindowItem(id: 55, title: "Doc", appName: "Notes", frame: CGRect(x: 100, y: 100, width: 800, height: 600))],
+        requestResults: [PermissionKind: PermissionState] = [:],
         initial: ShellSettings? = nil
     ) {
         suite = "shell-tests-\(UUID().uuidString)"
@@ -125,7 +126,7 @@ struct ShellRig {
                 sources: StubSourceProvider(
                     listing: SourceListing(displays: [Self.mainDisplay, Self.sideDisplay], windows: windows),
                     mics: mics, cams: cams),
-                permissions: StubPermissions(states: permissions)),
+                permissions: StubPermissions(states: permissions, requestResults: requestResults)),
             effects: effects, settingsStore: settingsStore)
     }
 

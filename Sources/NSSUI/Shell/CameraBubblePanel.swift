@@ -6,6 +6,8 @@ import NSSCore
 final class CameraPreviewSession: @unchecked Sendable {
     let session = AVCaptureSession()
     private let queue = DispatchQueue(label: "notscreenstudio.shell.camera-preview")
+    /// Called on the main queue after the input has been added.
+    var onConfigured: (() -> Void)?
 
     func start(deviceID: String?) {
         queue.async { [self] in
@@ -16,6 +18,7 @@ final class CameraPreviewSession: @unchecked Sendable {
                 session.addInput(input)
             }
             session.commitConfiguration()
+            DispatchQueue.main.async { self.onConfigured?() }
             if !session.isRunning { session.startRunning() }
         }
     }
@@ -43,6 +46,11 @@ final class CameraBubbleView: NSView {
         layer?.backgroundColor = NSColor.black.withAlphaComponent(0.4).cgColor
         previewLayer.videoGravity = .resizeAspectFill
         layer?.addSublayer(previewLayer)
+    }
+
+    /// The preview layer only gets its connection once the session has an input, so this runs after the input is added.
+    @MainActor
+    func applyMirroring() {
         if let connection = previewLayer.connection, connection.isVideoMirroringSupported {
             connection.automaticallyAdjustsVideoMirroring = false
             connection.isVideoMirrored = true
@@ -124,6 +132,7 @@ final class CameraBubblePanel: NSPanel {
         handle.autoresizingMask = [.minXMargin, .maxYMargin]
         root.addSubview(handle)
         contentView = root
+        preview.onConfigured = { [weak bubbleView] in MainActor.assumeIsolated { bubbleView?.applyMirroring() } }
         preview.start(deviceID: deviceID)
     }
 

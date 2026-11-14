@@ -84,6 +84,55 @@ import NSSCore
         #expect(!rig.effects.bubbleShown)
     }
 
+    @Test func undecidedDevicePermissionIsAskedBeforeStartAndDeclinedIsSkipped() async {
+        let rig = ShellRig(
+            permissions: [.screenRecording: .granted, .camera: .notDetermined, .microphone: .notDetermined],
+            requestResults: [.camera: .denied, .microphone: .denied],
+            initial: ShellSettings(micEnabled: true, cameraEnabled: true))
+        defer { rig.cleanup() }
+        await rig.model.startRecording()
+        #expect(rig.model.isRecording)
+        #expect(rig.session.startedOptions?.micDeviceID == nil)
+        #expect(rig.session.startedOptions?.cameraDeviceID == nil)
+        #expect(rig.model.notice?.contains("Microphone skipped") == true)
+        #expect(rig.model.notice?.contains("Camera skipped") == true)
+        #expect(!rig.effects.bubbleShown)
+        #expect(rig.model.onboardingRequestID == 0)
+    }
+
+    @Test func undecidedDevicePermissionThatIsGrantedIsUsed() async {
+        let rig = ShellRig(
+            permissions: [.screenRecording: .granted, .camera: .notDetermined, .microphone: .notDetermined],
+            requestResults: [.camera: .granted, .microphone: .granted],
+            initial: ShellSettings(micEnabled: true, cameraEnabled: true))
+        defer { rig.cleanup() }
+        await rig.model.startRecording()
+        #expect(rig.session.startedOptions?.micDeviceID == "mic1")
+        #expect(rig.session.startedOptions?.cameraDeviceID == "cam1")
+        #expect(rig.model.notice == nil)
+    }
+
+    @Test func projectNameMatchesBundleName() async throws {
+        let rig = ShellRig()
+        defer { rig.cleanup() }
+        await rig.model.startRecording()
+        await rig.model.stopRecording()
+        let saved = try #require(rig.model.lastSaved)
+        #expect(saved.reference.url.deletingPathExtension().lastPathComponent == saved.project.name)
+    }
+
+    @Test func failedSessionStopRemovesTheEmptyBundle() async throws {
+        let rig = ShellRig()
+        defer { rig.cleanup() }
+        await rig.model.startRecording()
+        let bundle = try #require(rig.session.startedBundle)
+        rig.session.failStop = .io("No screen frames were captured.")
+        await rig.model.stopRecording()
+        #expect(rig.model.phase == .failed("No screen frames were captured."))
+        #expect(!FileManager.default.fileExists(atPath: bundle.path))
+        #expect(rig.model.lastSaved == nil)
+    }
+
     @Test func startFailureLeavesFailedPhaseAndNoEmptyBundle() async throws {
         let rig = ShellRig()
         defer { rig.cleanup() }

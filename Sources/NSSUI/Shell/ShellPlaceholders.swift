@@ -4,11 +4,17 @@ import NSSCore
 /// Inert services for previews and the default `MenuBarContent`. Nothing here touches the system.
 public struct StubPermissions: PermissionsProviding {
     public var states: [PermissionKind: PermissionState]
-    public init(states: [PermissionKind: PermissionState] = [.screenRecording: .granted, .camera: .granted, .microphone: .granted]) {
+    /// What `request` answers for a kind. Kinds not listed answer with their current state.
+    public var requestResults: [PermissionKind: PermissionState]
+    public init(
+        states: [PermissionKind: PermissionState] = [.screenRecording: .granted, .camera: .granted, .microphone: .granted],
+        requestResults: [PermissionKind: PermissionState] = [:]
+    ) {
         self.states = states
+        self.requestResults = requestResults
     }
     public func status(of kind: PermissionKind) -> PermissionState { states[kind] ?? .notDetermined }
-    public func request(_ kind: PermissionKind) async -> PermissionState { status(of: kind) }
+    public func request(_ kind: PermissionKind) async -> PermissionState { requestResults[kind] ?? status(of: kind) }
     public func openSettings(for kind: PermissionKind) {}
 }
 
