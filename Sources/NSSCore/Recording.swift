@@ -102,6 +102,19 @@ public enum RecordingState: Codable, Sendable, Equatable {
     case failed(message: String)
 }
 
+extension RecordingAssets {
+    /// True when `name` is a plain file name that stays inside the project bundle: non-empty, no path
+    /// separators, not `.` or `..`, and no NUL.
+    public static func isSafeFileName(_ name: String) -> Bool {
+        !name.isEmpty && name != "." && name != ".." && !name.contains("/") && !name.contains("\\") && !name.contains("\0")
+    }
+
+    /// The first stored file name that is not a plain name inside the bundle, if any.
+    public var unsafeFileName: String? {
+        ([screenFile, cursorFile] + [cameraFile, micFile, thumbnailFile].compactMap { $0 }).first { !Self.isSafeFileName($0) }
+    }
+}
+
 // Forward compatibility: fields added after v1 decode with defaults when absent (see PLAN.md).
 extension RecordingAssets {
     public init(from decoder: Decoder) throws {

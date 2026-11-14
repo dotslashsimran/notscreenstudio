@@ -38,6 +38,21 @@ Note: every time you rebuild with `bundle.sh` the app is signed ad hoc again, so
     - Good: it holds `project.json`, `screen.mov`, `camera.mov`, `mic.m4a` and `cursor.json`. `cursor.json` is more than a few kilobytes. A `thumbnail.jpg` appears a moment after the editor opens.
 10a. Play the recording in the editor and step through the first and last seconds.
     - Good: no recording bar, no countdown and no camera bubble overlay are baked into the screen video. The camera bubble you see is the one drawn by the editor, and it follows your Camera settings.
+10b. Countdown with warm-up: record your main display with the 3 second countdown and with something moving on screen (a clock or a video playing).
+    1. Click Record and watch the 3, 2, 1 numbers.
+    2. As soon as the countdown ends, the recording bar must appear at once, with no extra pause and no second countdown.
+    3. Stop after about 5 seconds and open the recording in the editor. Press Left Arrow at the very start (playhead at 0:00).
+    - Good: the first frame already shows the screen (not black, not a frozen frame from before you clicked Record). The first frame is from the moment the countdown ended, so the countdown numbers are not in it.
+    - Good: the first mouse click you made right after the countdown ends is at the right time in the timeline (the ripple starts when the click happened).
+10c. Own windows never in the recording: the recording bar (stop bar), the camera bubble, the 3, 2, 1 countdown and the area-selection overlay must not appear in any recording of a display or an area.
+    1. Start the app from Terminal with logging on: `NSS_CAPTURE_DEBUG=1 build/NotScreenStudio.app/Contents/MacOS/NotScreenStudio`.
+    2. Record a whole display with the camera on and the 3 second countdown. While recording, drag the camera bubble around and click Stop only after 5 seconds.
+    3. Record an area: choose Area, drag a rectangle that covers the place where the recording bar and the camera bubble sit, and record for 5 seconds.
+    4. During one of the recordings, open a new window of this app mid-recording (for example choose Permissions from the menu bar icon, or open the editor for an older recording), and leave it open for 2 seconds over the recorded area.
+    5. Open each new recording in the editor and step through it from start to end (Right Arrow, or drag the playhead slowly).
+    - Good: in no frame do you see the recording bar, the camera bubble drawn by the overlay (the editor's own bubble is expected), the countdown numbers, the area-selection frame or the extra window you opened mid-recording. There is no black hole or outline where they were.
+    - Good: the Terminal shows lines like `[NSS capture] filter (...) target=... ownPID=...` with `excluded apps (pid): [...]` and a list of this app's windows (for example the bar and the bubble). It must not show `WARNING: nothing excluded`. A line appears again after a new window opens mid-recording.
+    - Also try: a single-window recording. Good: the log says `single-window capture: nothing else is visible, no exclusion needed`.
 11. Record again, this time choosing a single window as the source. Drag that window around while recording, click inside it, then stop.
     - Good: the editor shows only that window. In the editor the cursor stays on the right spot inside the window even though the window moved.
 12. Record again, this time choosing Area and dragging a rectangle over part of the screen. Click inside the area, then stop.
@@ -93,6 +108,10 @@ Open each recording in the editor and check the following.
     - Good for 16:9: 1920×1080 at 60 fps. For 1:1: 1080×1080. For 9:16: 1080×1920. Voice and picture are in sync, and the video matches the trim you set.
 25. Compare the MP4 with the editor preview: zoom timing, cursor, ripples, background and the camera bubble position.
     - Good: they look the same.
+25a. Edges and clicks in the corners: record clicking close to all four corners and the middle of all four edges of the screen (wait one second between clicks), then play it in the editor in 16:9, 1:1 and 9:16.
+    - Good: each time the view zooms in on a corner or an edge, the screen fills its rounded frame: there is no strip of background color, no smeared or stretched pixels along the frame edge. Check the same in the export.
+25b. Audio and sync: record yourself clapping (or tapping the desk) while a clock or an animation runs on screen. Trim about one second off the start, export at 1080p, and open the MP4 in QuickTime Player.
+    - Good: the clap is heard at the moment the picture shows it (no more than about one frame of 1/60 s off), and the first second you trimmed away is missing in both the picture and the sound.
 26. Export again at 4K.
     - Good: sizes are 3840×2160, 2160×2160 and 2160×3840 for the three shapes. The file plays smoothly. It takes longer than 1080p, but the app stays responsive.
 27. Quit and reopen the app, then choose Open Last Recording in the menu.
@@ -118,5 +137,5 @@ Open each recording in the editor and check the following.
 
 ## 6. Quick regression check for the automated tests
 
-28. In the repo run `swift test -j 2`. Optionally run `NSS_E2E_4K=1 swift test -j 2 --filter EndToEndExportTests` for the 4K exports, and `NSS_BENCH=1 swift test -j 2 --filter PreviewPerformanceTests` for the preview timing budget.
+28. In the repo run `swift test -j 2`. Optionally run `NSS_E2E_4K=1 swift test -j 2 --filter EndToEndExportTests` for the 4K exports, and `NSS_BENCH=1 swift test -j 2 --filter PreviewPerformanceTests` for the preview timing budget. `swift test -j 2 --filter ParityTests` prints the export-versus-preview numbers, `--filter EdgeGapTests` checks the corner and edge clicks, and `NSS_BENCH=1 ... --filter PreviewPerformanceTests` prints the frame time report.
     - Good: all tests pass.

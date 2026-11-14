@@ -114,6 +114,10 @@ struct EditorContent: View {
             InspectorView(model: model)
         }
         .toolbar { toolbar }
+        .alert("Couldn't save", isPresented: Binding(get: { model.saveError != nil }, set: { if !$0 { model.saveError = nil } })) {
+            Button("Stay") { model.saveError = nil }
+            if let onBack { Button("Leave Anyway", role: .destructive) { model.saveError = nil; onBack() } }
+        } message: { Text(model.saveError ?? "") }
         .sheet(item: $exportModel) { m in
             ExportSheet(export: m, close: { exportModel = nil })
         }
@@ -139,9 +143,12 @@ struct EditorContent: View {
             ToolbarItem(placement: .navigation) {
                 Button {
                     // Write pending edits now so the home screen (name, thumbnail) sees them.
-                    let project = model.project, ref = model.reference, store = model.dependencies.store
-                    Task { try? await store.save(project, to: ref) }
-                    onBack()
+                    // Unchanged projects are not rewritten; a failed write is shown and keeps the editor open.
+                    Task {
+                        do { try await model.saveNow(); onBack() } catch {
+                            model.saveError = "Couldn't save your changes: \(error.localizedDescription)"
+                        }
+                    }
                 } label: { Label("Recordings", systemImage: "chevron.left") }
                     .help("Back to all recordings")
             }

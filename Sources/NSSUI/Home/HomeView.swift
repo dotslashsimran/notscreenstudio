@@ -85,7 +85,7 @@ public struct HomeView: View {
                 ForEach(model.items) { item in
                     HomeTile(summary: item, image: model.thumbnails[item.id], failed: model.failedThumbnails.contains(item.id))
                         .onTapGesture { onOpen(item.bundle) }
-                        .task(id: item.id) { await model.loadThumbnail(for: item) }
+                        .task(id: item) { await model.loadThumbnail(for: item) }
                         .contextMenu {
                             Button("Open") { onOpen(item.bundle) }
                             Button("Rename…") { renameText = item.name; renaming = item }

@@ -115,11 +115,17 @@ public actor FileProjectStore: ProjectStore {
             throw NSSError.invalidProject("Missing \(url.lastPathComponent)")
         }
         let migrated = try migrator.migrate(data)
+        let project: Project
         do {
-            return try Self.decoder().decode(Project.self, from: migrated)
+            project = try Self.decoder().decode(Project.self, from: migrated)
         } catch {
             throw NSSError.invalidProject("Corrupt \(url.lastPathComponent): \(error.localizedDescription)")
         }
+        // Asset names are joined onto the bundle path: they must not point outside it.
+        if let bad = project.assets.unsafeFileName {
+            throw NSSError.invalidProject("\(url.lastPathComponent) names a file outside the project: \(bad)")
+        }
+        return project
     }
 
     public func save(_ project: Project, to ref: ProjectReference) async throws {
