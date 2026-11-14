@@ -1,7 +1,8 @@
 import CoreVideo
 import NSSCore
 
-/// STUB (Renderer worker replaces): clears the output to the style's flat background color on the CPU.
+/// CPU fallback for Macs without Metal (see `MetalRenderer.makeDefault()`): clears the output to the
+/// style's flat background color. Does not draw the screen, cursor or camera.
 /// Expects a 32BGRA output buffer.
 public struct PassthroughRenderer: FrameRenderer {
     public init() {}

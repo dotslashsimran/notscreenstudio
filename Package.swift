@@ -23,7 +23,14 @@ targets.append(library("NSSCapture", ["NSSCore"]))
 targets.append(library("NSSInput", ["NSSCore"]))
 targets.append(library("NSSProject", ["NSSCore"]))
 targets.append(library("NSSMotion", ["NSSCore"]))
-targets.append(library("NSSRender", ["NSSCore"]))
+targets.append(
+    Target.target(
+        name: "NSSRender",
+        dependencies: [Target.Dependency.target(name: "NSSCore")],
+        exclude: ["RENDERING.md"],
+        swiftSettings: settings
+    )
+)
 targets.append(library("NSSExport", ["NSSCore", "NSSRender", "NSSMotion"]))
 targets.append(library("NSSUI", uiDeps))
 targets.append(tests("NSSCore", ["NSSCore"]))
