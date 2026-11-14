@@ -200,7 +200,8 @@ extension CameraBubble {
         shape = try c.decodeIfPresent(CameraShape.self, forKey: .shape) ?? d.shape
         position = try c.decodeIfPresent(NormalizedPoint.self, forKey: .position) ?? d.position
         size = try c.decodeIfPresent(Double.self, forKey: .size) ?? d.size
-        border = try c.decodeIfPresent(CameraBorder.self, forKey: .border) ?? d.border
+        // v1 field, optional: a missing key means nil (border off), not the default.
+        border = try c.decodeIfPresent(CameraBorder.self, forKey: .border)
         mirror = try c.decodeIfPresent(Bool.self, forKey: .mirror) ?? d.mirror
     }
 }

@@ -57,4 +57,12 @@ import Testing
         let back = try JSONDecoder().decode(RecordingAssets.self, from: JSONEncoder().encode(a))
         #expect(back.startHostTime == 12345.678)
     }
+
+    @Test func cameraWithoutBorderRoundTrips() throws {
+        var p = Project(name: "n", assets: RecordingAssets(sourcePixelSize: PixelSize(width: 1, height: 1), frameRate: 60, duration: 1))
+        p.style.camera.border = nil
+        let back = try JSONDecoder().decode(Project.self, from: JSONEncoder().encode(p))
+        #expect(back.style.camera.border == nil)
+        #expect(back == p)
+    }
 }
