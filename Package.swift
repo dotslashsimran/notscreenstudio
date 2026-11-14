@@ -39,7 +39,7 @@ targets.append(tests("NSSInput", ["NSSInput", "NSSCore"]))
 targets.append(tests("NSSProject", ["NSSProject", "NSSCore"]))
 targets.append(tests("NSSMotion", ["NSSMotion", "NSSCore"]))
 targets.append(tests("NSSRender", ["NSSRender", "NSSCore"]))
-targets.append(tests("NSSExport", ["NSSExport", "NSSCore"]))
+targets.append(tests("NSSExport", ["NSSExport", "NSSCore", "NSSRender", "NSSMotion"]))
 targets.append(tests("NSSUI", ["NSSUI", "NSSCore"]))
 targets.append(
     Target.executableTarget(
