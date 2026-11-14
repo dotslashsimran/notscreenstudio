@@ -18,13 +18,7 @@ public struct RenderLayout: Sendable, Equatable {
     public init(outputSize: PixelSize, sourceSize: PixelSize, style: Style, camera: CameraState) {
         self.outputSize = outputSize
         self.sourceSize = sourceSize
-        // Non-finite camera values (e.g. a spring that blew up) fall back to identity per component
-        // instead of poisoning every uniform with NaN.
-        var cam = camera
-        cam.scale = camera.scale.isFinite ? max(camera.scale, 1e-3) : 1
-        if !camera.center.x.isFinite { cam.center.x = 0.5 }
-        if !camera.center.y.isFinite { cam.center.y = 0.5 }
-        self.camera = cam
+        self.camera = Self.clampedCamera(camera)
 
         let w = Double(max(outputSize.width, 1))
         let h = Double(max(outputSize.height, 1))
@@ -42,6 +36,18 @@ public struct RenderLayout: Sendable, Equatable {
         }
         contentRect = CGRect(x: (w - cw) / 2, y: (h - ch) / 2, width: cw, height: ch)
         cornerRadius = min(max(0, style.cornerRadius) * h, min(cw, ch) / 2)
+    }
+
+    /// The camera the renderer actually uses: the viewport always lies inside the source, so the screen
+    /// content never shows a gap or a stretched edge. Scale is at least 1 and the centre is kept
+    /// `0.5 / scale` away from every source edge (the same rule as the motion model). Non-finite values
+    /// (e.g. a spring that blew up) fall back to identity per component instead of poisoning every
+    /// uniform with NaN.
+    public static func clampedCamera(_ camera: CameraState) -> CameraState {
+        let scale = camera.scale.isFinite ? max(camera.scale, 1) : 1
+        let half = 0.5 / scale
+        func axis(_ v: Double) -> Double { v.isFinite ? min(max(v, half), 1 - half) : 0.5 }
+        return CameraState(scale: scale, center: NormalizedPoint(x: axis(camera.center.x), y: axis(camera.center.y)))
     }
 
     /// Output pixel size for an aspect ratio and export resolution (same as `AspectRatio.outputSize(for:)`).
@@ -80,6 +86,12 @@ public struct RenderLayout: Sendable, Equatable {
         0.0165 * contentScale * camera.scale * max(0, style.size)
     }
 
+    /// Output pixels per cursor point (the unit of `NSCursor` images and hotspots) at normal size,
+    /// before `CursorState.pressScale`. The 19 pt reference is the height of the macOS arrow with its outline.
+    public func cursorPixelsPerPoint(style: CursorStyle) -> Double {
+        cursorHeight(style: style) / 19
+    }
+
     /// Output-pixel blur vector for the cursor (full shutter length, centred on the cursor position).
     public func cursorBlurVector(velocity: NormalizedPoint, style: CursorStyle) -> CGVector {
         let shutter = max(0, min(1, style.motionBlur)) / 30.0
@@ -115,11 +127,38 @@ public struct RenderLayout: Sendable, Equatable {
 
     // MARK: Camera bubble
 
-    /// Bubble frame in output pixels, from the shared `CameraBubbleGeometry`.
+    /// Bubble size multiplier for this layout's camera zoom (`CameraBubble.sizeMultiplier(cameraScale:)`).
+    public func cameraBubbleSizeMultiplier(_ bubble: CameraBubble) -> Double {
+        let m = bubble.sizeMultiplier(cameraScale: camera.scale)
+        return m.isFinite ? max(0, m) : 1
+    }
+
+    /// Bubble frame in output pixels as drawn at this layout's camera zoom, from the shared
+    /// `CameraBubbleGeometry`. At scale 1 it is centred on `bubble.position`. When zoomed in it shrinks
+    /// by `cameraBubbleSizeMultiplier` toward its anchor (see `bubbleAnchor`), so a bubble in a corner
+    /// stays tucked into that corner instead of drifting toward the middle.
     public func cameraBubbleRect(_ bubble: CameraBubble, cameraSize: PixelSize?) -> CGRect {
+        let full = cameraBubbleFullRect(bubble)
+        let m = cameraBubbleSizeMultiplier(bubble)
+        let w = full.width * m, h = full.height * m
+        let ax = Self.bubbleAnchor(bubble.position.x), ay = Self.bubbleAnchor(bubble.position.y)
+        return CGRect(x: full.minX + ax * (full.width - w), y: full.minY + ay * (full.height - h), width: w, height: h)
+    }
+
+    /// Bubble frame at full size (camera scale 1), centred on `bubble.position`.
+    public func cameraBubbleFullRect(_ bubble: CameraBubble) -> CGRect {
         let w = Double(outputSize.width), h = Double(outputSize.height)
         let l = CameraBubbleGeometry.layout(bubble, width: max(0, bubble.size) * w)
         return CGRect(x: bubble.position.x * w - l.width / 2, y: bubble.position.y * h - l.height / 2, width: l.width, height: l.height)
+    }
+
+    /// Which point of the full-size bubble stays fixed while it shrinks, per axis, from the bubble's
+    /// normalized output position: 0 (left/top edge) in the first third, 1 (right/bottom edge) in the
+    /// last third, and a linear blend through the middle third (0.5 = centre at 0.5). Continuous, so
+    /// dragging the bubble while zoomed never makes it jump.
+    public static func bubbleAnchor(_ position: Double) -> Double {
+        guard position.isFinite else { return 0.5 }
+        return min(max((position - 1.0 / 3.0) * 3, 0), 1)
     }
 
     /// Corner radius of the bubble in output pixels.

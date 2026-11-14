@@ -32,6 +32,8 @@ public final class MetalRenderer: FrameRenderer, @unchecked Sendable {
     private let textureCache: CVMetalTextureCache
     private let uniforms: MTLBuffer
     private let placeholder: MTLTexture
+    private let cursorAtlas: MTLTexture
+    private let cursorCells: [CursorShape: CursorAtlas.Cell]
     private let passDescriptor = MTLRenderPassDescriptor()
     private let outputTextureAttributes: CFDictionary
 
@@ -66,6 +68,8 @@ public final class MetalRenderer: FrameRenderer, @unchecked Sendable {
         var black: UInt32 = 0xFF00_0000
         tex.replace(region: MTLRegionMake2D(0, 0, 1, 1), mipmapLevel: 0, withBytes: &black, bytesPerRow: 4)
         placeholder = tex
+
+        (cursorAtlas, cursorCells) = try CursorAtlasCache.shared.texture(for: device, queue: queue)
 
         let usage = MTLTextureUsage([.renderTarget, .shaderRead]).rawValue
         outputTextureAttributes = [kCVMetalTextureUsage: NSNumber(value: usage)] as CFDictionary
@@ -124,6 +128,7 @@ public final class MetalRenderer: FrameRenderer, @unchecked Sendable {
         enc.setFragmentTexture(screenTex, index: 0)
         enc.setFragmentTexture(cameraTex ?? placeholder, index: 1)
         enc.setFragmentTexture(image ?? placeholder, index: 2)
+        enc.setFragmentTexture(cursorAtlas, index: 3)
         enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
         enc.endEncoding()
         cmd.commit()
@@ -160,22 +165,35 @@ public final class MetalRenderer: FrameRenderer, @unchecked Sendable {
 
         writeBackground(style.background, image: image, W: W, H: H, set: { set($0, $1, $2, $3, $4) }, setAt: { setAt($0, $1, $2, $3, $4, $5) })
 
-        // Cursor
+        // Cursor: the system cursor image for `shape`, hotspot on the position, squished around the hotspot.
         let cs = state.cursor
-        let alpha = cs.visible ? max(0, min(1, cs.opacity)) : 0
-        if alpha > 0 {
-            let tip = layout.outputPoint(forSource: cs.position)
-            let unit = layout.cursorHeight(style: style.cursor) / 19.0
-            let blur = layout.cursorBlurVector(velocity: cs.velocity, style: style.cursor)
-            let len = (blur.dx * blur.dx + blur.dy * blur.dy).squareRoot()
-            let samples = len < 1 ? 1 : min(16, Int((len / 2).rounded(.up)) + 1)
-            let bx = samples == 1 ? 0 : blur.dx, by = samples == 1 ? 0 : blur.dy
-            set(.cursor, tip.x, tip.y, unit, alpha)
-            set(.cursorBlur, bx, by, Double(samples))
-            // Arrow bounds incl. outline and shadow are about [-4, 16] x [-4, 24] units.
-            let minX = tip.x - 4 * unit - abs(bx) / 2, maxX = tip.x + 16 * unit + abs(bx) / 2
-            let minY = tip.y - 4 * unit - abs(by) / 2, maxY = tip.y + 24 * unit + abs(by) / 2
-            set(.cursorBox, minX, minY, maxX, maxY)
+        let alpha = cs.visible && cs.opacity.isFinite ? max(0, min(1, cs.opacity)) : 0
+        if alpha > 0, let cell = cursorCells[cs.shape] ?? cursorCells[.arrow] {
+            let press = cs.pressScale.isFinite ? max(0.05, min(4, cs.pressScale)) : 1
+            let ppp = layout.cursorPixelsPerPoint(style: style.cursor) * press
+            if ppp > 0 {
+                let hot = layout.outputPoint(forSource: cs.position)
+                let blur = layout.cursorBlurVector(velocity: cs.velocity, style: style.cursor)
+                let len = (blur.dx * blur.dx + blur.dy * blur.dy).squareRoot()
+                let samples = len < 1 ? 1 : min(16, Int((len / 2).rounded(.up)) + 1)
+                let bx = samples == 1 ? 0 : blur.dx, by = samples == 1 ? 0 : blur.dy
+                let lod = Self.cursorLOD(pixelsPerPoint: ppp)
+                set(.cursor, hot.x, hot.y, ppp, alpha)
+                set(.cursorBlur, bx, by, Double(samples), lod)
+                // Image bounds in output px, grown by the shader's 2 pt margin, half the blur and 1 px.
+                let mx: Double = 2 * ppp + 1 + Double(abs(bx)) / 2, my: Double = 2 * ppp + 1 + Double(abs(by)) / 2
+                let hx = Double(hot.x), hy = Double(hot.y)
+                let sx = Double(cell.hotspot.x), sy = Double(cell.hotspot.y)
+                let iw = Double(cell.size.width), ih = Double(cell.size.height)
+                let minX: Double = hx - sx * ppp - mx
+                let maxX: Double = hx + (iw - sx) * ppp + mx
+                let minY: Double = hy - sy * ppp - my
+                let maxY: Double = hy + (ih - sy) * ppp + my
+                set(.cursorBox, minX, minY, maxX, maxY)
+                let aw = Double(cursorAtlas.width), ah = Double(cursorAtlas.height)
+                set(.cursorCell, Double(cell.x) / aw, Double(cell.y) / ah, Double(cell.width) / aw, Double(cell.height) / ah)
+                set(.cursorCell2, cell.hotspot.x, cell.hotspot.y, cell.size.width, cell.size.height)
+            }
         }
 
         // Ripples
@@ -189,27 +207,30 @@ public final class MetalRenderer: FrameRenderer, @unchecked Sendable {
             set(.rippleParams, Double(n), layout.rippleThickness)
         }
 
-        // Camera bubble
+        // Camera bubble: shared geometry, shrunk toward its corner/edge while zoomed. Border and
+        // shadow scale with the bubble.
         let bubble = style.camera
         if let camera, bubble.visible, bubble.size > 0 {
             let camSize = PixelSize(width: camera.width, height: camera.height)
             let r = layout.cameraBubbleRect(bubble, cameraSize: camSize)
-            let shape: Double = bubble.shape == .circle ? 0 : 1
-            let border = bubble.border.map { max(0, $0.width) * H } ?? 0
-            set(.bubble, r.midX, r.midY, r.width / 2, r.height / 2)
-            set(.bubble2, shape, layout.cameraBubbleCornerRadius(bubble, rect: r), border, 1)
-            // Aspect-fill: crop the camera to the bubble aspect.
-            let ba = r.width / max(r.height, 1), ca = camSize.aspect
-            let sx = ca > ba ? ba / ca : 1, sy = ca > ba ? 1 : ca / ba
-            let texelsPerPx = Double(camera.width) * sx / max(r.width, 1)
-            set(.bubbleUV, sx, sy, bubble.mirror ? 1 : 0, Double(Self.taps(texelsPerPixel: texelsPerPx)))
-            set(.bubbleSS, sx / max(r.width, 1), sy / max(r.height, 1))
-            if let bc = bubble.border?.color {
-                let lin = ColorMath.linear(bc)
-                set(.borderColor, lin.x, lin.y, lin.z, max(0, min(1, bc.a)))
+            let k = layout.cameraBubbleSizeMultiplier(bubble)
+            if r.width >= 0.5, r.height >= 0.5 {
+                let border = bubble.border.map { max(0, $0.width) * H * k } ?? 0
+                set(.bubble, r.midX, r.midY, r.width / 2, r.height / 2)
+                set(.bubble2, 0, layout.cameraBubbleCornerRadius(bubble, rect: r), border, 1)
+                // Aspect-fill: crop the camera to the bubble aspect.
+                let ba = r.width / max(r.height, 1e-6), ca = camSize.aspect
+                let sx = ca > ba ? ba / ca : 1, sy = ca > ba ? 1 : ca / ba
+                let texelsPerPx = Double(camera.width) * sx / max(r.width, 1)
+                set(.bubbleUV, sx, sy, bubble.mirror ? 1 : 0, Double(Self.taps(texelsPerPixel: texelsPerPx)))
+                set(.bubbleSS, sx / max(r.width, 1), sy / max(r.height, 1))
+                if let bc = bubble.border?.color {
+                    let lin = ColorMath.linear(bc)
+                    set(.borderColor, lin.x, lin.y, lin.z, max(0, min(1, bc.a)))
+                }
+                let bs = style.shadow
+                set(.bubbleShadow, max(0, bs.radius) * H / 2 * k, max(0, min(1, bs.opacity)), bs.offsetX * H * k, bs.offsetY * H * k)
             }
-            let bs = style.shadow
-            set(.bubbleShadow, max(0, bs.radius) * H / 2, max(0, min(1, bs.opacity)), bs.offsetX * H, bs.offsetY * H)
         }
     }
 
@@ -257,6 +278,13 @@ public final class MetalRenderer: FrameRenderer, @unchecked Sendable {
                 setAt(.loc0, i, p.x, p.y, 0, 0)
             }
         }
+    }
+
+    /// Atlas mip level for a cursor drawn at `ppp` output pixels per point (the atlas holds
+    /// `CursorAtlas.scale` pixels per point at level 0), clamped to the levels the padding protects.
+    static func cursorLOD(pixelsPerPoint ppp: Double) -> Double {
+        guard ppp.isFinite, ppp > 0 else { return 0 }
+        return min(max(log2(CursorAtlas.scale / ppp), 0), CursorAtlas.maxLOD)
     }
 
     /// Taps per axis for the footprint filter: enough to cover the source texels under one output pixel.

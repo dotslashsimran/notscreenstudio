@@ -136,15 +136,16 @@ struct MetalRendererTests {
         style.cursor.motionBlur = motionBlur
         try MetalRenderer().render(screen: screen, camera: nil, state: FrameState(time: 0, cursor: cursor), style: style, into: out)
         let l = RenderLayout(outputSize: PixelSize(width: W, height: H), sourceSize: PixelSize(width: 1920, height: 1080), style: style, camera: .identity)
-        return (out, l.outputPoint(forSource: cursor.position), l.cursorHeight(style: style.cursor) / 19)
+        return (out, l.outputPoint(forSource: cursor.position), l.cursorPixelsPerPoint(style: style.cursor))
     }
 
     @Test func cursorIsDrawnAndRespectsVisibility() throws {
         let (out, tip, unit) = try cursorScene(CursorState())
         let body = CGPoint(x: tip.x + 3 * unit, y: tip.y + 8 * unit)
-        let outline = CGPoint(x: tip.x - 0.6 * unit, y: tip.y + 8 * unit)
+        // The system arrow: black body, white outline along its left edge (just left of the body).
         #expect(TB.pixel(out, body).luma < 15, "body \(TB.pixel(out, body))")
-        #expect(TB.pixel(out, outline).luma > 230, "outline \(TB.pixel(out, outline))")
+        let outline: Int = (0..<Int(4 * unit)).map { (i: Int) -> Int in TB.pixel(out, Int(tip.x + 3 * unit) - i, Int(body.y)).luma }.max() ?? 0
+        #expect(outline > 230, "outline \(outline)")
 
         let (hidden, _, _) = try cursorScene(CursorState(visible: false))
         #expect(abs(TB.pixel(hidden, body).luma - 128) <= 2)
