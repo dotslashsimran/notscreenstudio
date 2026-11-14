@@ -244,7 +244,6 @@ public final class ShellModel {
             active = ActiveRecording(reference: ref, source: source, sourceRect: sourceRect, cameraDeviceID: camID, name: name)
             // The camera bubble is shown before capture is prepared, so the capture filter is built with every
             // window of this app already on screen (and the user can see themselves during the countdown).
-            showBubbleOverlay()
             try await begin(options: options, into: ref.url, countdown: seconds, over: sourceRect)
 
             let startedAt = now()
@@ -270,12 +269,16 @@ public final class ShellModel {
     }
 
     private struct StartCancelled: Error {}
+    private final class FatalBox { var error: NSSError? }
 
     /// Counts down (if enabled) while the capture warms up, then starts recording at the end of the countdown.
     /// Sessions that cannot warm up simply start after the countdown. Throws `StartCancelled` if the user cancels.
     private func begin(options: RecordingOptions, into url: URL, countdown seconds: Int, over sourceRect: CGRect?) async throws {
         let area = sourceRect ?? CGRect(x: 0, y: 0, width: 1440, height: 900)
         guard let warm = services.session as? any WarmableRecordingSession else {
+            // The bubble is shown before capture is prepared, so the capture filter is built with every
+            // window of this app already on screen (and the user can see themselves during the countdown).
+            showBubbleOverlay()
             if seconds > 0 {
                 isCountingDown = true
                 let done = await effects.runCountdown(seconds: seconds, over: area)
@@ -285,6 +288,21 @@ public final class ShellModel {
             try await services.session.start(options: options, into: url)
             return
         }
+        // Permissions first: no bubble or countdown appears for a recording that cannot start.
+        try await warm.preflight(options: options)
+        showBubbleOverlay()
+        // A screen stream that dies during the countdown cuts it short and its real error is reported.
+        let fatal = FatalBox()
+        let events = warm.captureEvents
+        let effects0 = self.effects
+        let watcher = Task { @MainActor in
+            for await e in events where e.isFatal {
+                fatal.error = e.error
+                effects0.cancelCountdown()
+                return
+            }
+        }
+        defer { watcher.cancel() }
         // Warm-up runs during the countdown. If it fails the countdown is cut short and the error is reported.
         let effects = self.effects
         let warmUp = Task { @MainActor () -> Error? in
@@ -300,6 +318,10 @@ public final class ShellModel {
             isCountingDown = false
         }
         if let failure = await warmUp.value { throw failure }
+        if let error = fatal.error {
+            await warm.cancelPrepared()
+            throw error
+        }
         if !completed {
             await warm.cancelPrepared()
             throw StartCancelled()

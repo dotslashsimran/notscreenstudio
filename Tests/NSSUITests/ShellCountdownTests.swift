@@ -131,6 +131,31 @@ import NSSProject
         #expect(!rig.effects.bubbleShown)
     }
 
+    @Test func bubbleWaitsForPermissionPreflight() async {
+        let rig = ShellRig(initial: ShellSettings(cameraEnabled: true), warm: true)
+        defer { rig.cleanup() }
+        rig.warm?.failPreflight = .permissionDenied("Screen recording is off.")
+        var bubbleShownEver = false
+        rig.effects.onCountdown = { bubbleShownEver = true }
+        await rig.model.startRecording()
+        #expect(rig.model.phase == .failed("Screen recording is off."))
+        #expect(!rig.effects.bubbleShown)
+        #expect(rig.effects.bubbleShape == nil) // never shown
+        #expect(!bubbleShownEver) // and no countdown either
+        #expect(rig.warm?.calls.contains("prepare") == false)
+    }
+
+    @Test func streamDyingDuringCountdownReportsTheRealError() async {
+        let rig = ShellRig(warm: true)
+        defer { rig.cleanup() }
+        rig.warm?.fatalDuringPrepare = .io("The display was disconnected.")
+        await rig.model.startRecording()
+        #expect(rig.effects.cancelCountdownCalls >= 1)
+        #expect(rig.model.phase == .failed("The display was disconnected."))
+        #expect(rig.warm?.calls.contains("cancelPrepared") == true)
+        #expect(rig.warm?.calls.contains("begin") == false)
+    }
+
     @Test func hudAppearsAfterBeginAndExclusionsAreRefreshed() async throws {
         let rig = ShellRig(warm: true)
         defer { rig.cleanup() }

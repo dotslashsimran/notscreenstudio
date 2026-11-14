@@ -97,14 +97,12 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
     private var endedHost: Double?
     /// While false (the countdown), frames are not written. The newest one is kept so `arm()` can start
     /// the recording at once, even if the screen is static and no new frame would otherwise arrive.
-    private var armed: Bool
-    private var heldImage: CVImageBuffer?
-    private var heldFormat: CMVideoFormatDescription?
+    private var gate: FrameGate<(CVImageBuffer, CMVideoFormatDescription)>
 
     init(filter: SCContentFilter, plan: ScreenStreamPlan, url: URL, origin: SharedOrigin, armed: Bool = true,
          onFailure: @escaping @Sendable (NSSError) -> Void) throws {
         self.filter = filter
-        self.armed = armed
+        self.gate = FrameGate(armed: armed)
         self.plan = plan
         self.origin = origin
         self.onFailure = onFailure
@@ -141,16 +139,13 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
     /// Opens the gate. The recording's time origin becomes this instant: the held frame is stamped with the
     /// current host time, so t = 0 is the end of the countdown, not the moment capture warmed up.
     func arm() {
-        let held: (CVImageBuffer, CMVideoFormatDescription)? = lock.withLock {
-            armed = true
-            defer { heldImage = nil; heldFormat = nil }
-            if let i = heldImage, let f = heldFormat { return (i, f) }
-            return nil
-        }
-        guard let (image, format) = held else { return }
+        // Runs on the video queue, so every frame delivered before this point was already held or dropped,
+        // and nothing queued earlier can be written ahead of the held frame.
         videoQueue.async { [self] in
-            let timing = CMSampleTimingInfo(
-                duration: .invalid, presentationTimeStamp: CaptureMath.hostTime(CaptureMath.hostNow()), decodeTimeStamp: .invalid)
+            let now = CaptureMath.hostNow()
+            let held = lock.withLock { gate.arm(at: now) }
+            guard let (image, format) = held else { return }
+            let timing = CMSampleTimingInfo(duration: .invalid, presentationTimeStamp: CaptureMath.hostTime(now), decodeTimeStamp: .invalid)
             guard let sample = try? CMSampleBuffer(imageBuffer: image, formatDescription: format, sampleTiming: timing) else { return }
             write(sample)
         }
@@ -181,11 +176,10 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
         case .screen:
             guard Self.isCompleteFrame(sampleBuffer) else { return }
             let isArmed: Bool = lock.withLock {
-                if !armed, let image = sampleBuffer.imageBuffer {
-                    heldImage = image
-                    heldFormat = sampleBuffer.formatDescription
+                if !gate.isArmed, let image = sampleBuffer.imageBuffer, let format = sampleBuffer.formatDescription {
+                    gate.hold((image, format))
                 }
-                return armed
+                return gate.isArmed
             }
             guard isArmed else { return }
             write(sampleBuffer)
@@ -201,6 +195,7 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
 
     private func write(_ sampleBuffer: CMSampleBuffer) {
         let pts = sampleBuffer.presentationTimeStamp.seconds
+        guard lock.withLock({ gate.accept(pts: pts) }) else { return }
         if origin.setIfUnset(pts) {
             do { try writer.start(atOrigin: pts) } catch { onFailure(CaptureErrorMapper.map(error, context: .writer)); return }
         }

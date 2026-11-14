@@ -157,6 +157,10 @@ final class ShellFakeWarmSession: WarmableRecordingSession, @unchecked Sendable 
     private let inner = ShellFakeSession()
     private var _calls: [String] = []
     var failPrepare: NSSError?
+    var failPreflight: NSSError?
+    /// Emitted (on `prepare`) as a fatal capture event, to simulate the stream dying during the countdown.
+    var fatalDuringPrepare: NSSError?
+    private var eventContinuation: AsyncStream<CaptureEvent>.Continuation?
     var calls: [String] { lock.withLock { _calls } }
     var startedOptions: RecordingOptions? { inner.startedOptions }
     private func note(_ c: String) { lock.withLock { _calls.append(c) } }
@@ -166,8 +170,18 @@ final class ShellFakeWarmSession: WarmableRecordingSession, @unchecked Sendable 
     func start(options: RecordingOptions, into bundleURL: URL) async throws {
         note("start"); try await inner.start(options: options, into: bundleURL)
     }
+    var captureEvents: AsyncStream<CaptureEvent> {
+        AsyncStream { c in lock.withLock { eventContinuation = c } }
+    }
+    func preflight(options: RecordingOptions) async throws {
+        note("preflight")
+        if let failPreflight { throw failPreflight }
+    }
     func prepare(options: RecordingOptions, into bundleURL: URL) async throws {
         note("prepare")
+        if let fatalDuringPrepare {
+            lock.withLock { eventContinuation }?.yield(CaptureEvent(component: .screen, error: fatalDuringPrepare, isFatal: true))
+        }
         if let failPrepare { throw failPrepare }
         try await inner.start(options: options, into: bundleURL)
     }

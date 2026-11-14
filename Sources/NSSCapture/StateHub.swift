@@ -35,6 +35,12 @@ public struct CaptureEvent: Sendable, Equatable {
     public let error: NSSError
     /// True if the screen recording itself ended. Mic/camera losses are non-fatal: their files are finalized and recording continues.
     public let isFatal: Bool
+
+    public init(component: Component, error: NSSError, isFatal: Bool) {
+        self.component = component
+        self.error = error
+        self.isFatal = isFatal
+    }
 }
 
 final class EventHub: @unchecked Sendable {

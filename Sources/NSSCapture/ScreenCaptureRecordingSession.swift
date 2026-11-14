@@ -7,6 +7,10 @@ import NSSCore
 /// A session that can warm up (open the stream and devices) and start recording later, so a countdown can
 /// run in between. Frames are held back until `beginRecording()`, which makes that instant t = 0.
 public protocol WarmableRecordingSession: RecordingSession {
+    /// Checks (and asks for) the permissions the options need. Call before showing any recording UI.
+    func preflight(options: RecordingOptions) async throws
+    /// Runtime problems, including the screen stream ending while the countdown runs.
+    var captureEvents: AsyncStream<CaptureEvent> { get }
     /// Gets everything ready without recording. Throws if the sources cannot be captured.
     func prepare(options: RecordingOptions, into bundleURL: URL) async throws
     /// Starts recording now. Returns once the first frame is written (the origin is set).
@@ -57,6 +61,10 @@ public actor ScreenCaptureRecordingSession: WarmableRecordingSession {
         hub.set(.recording(startedAt: Date()))
     }
 
+    public func preflight(options: RecordingOptions) async throws {
+        do { try await CapturePermissions.ensure(for: options) } catch { throw CaptureErrorMapper.map(error) }
+    }
+
     public func prepare(options: RecordingOptions, into bundleURL: URL) async throws {
         try await prepare(options: options, into: bundleURL, armed: false)
         awaitingBegin = true
@@ -88,8 +96,10 @@ public actor ScreenCaptureRecordingSession: WarmableRecordingSession {
             throw NSSError.unsupported("No prepared recording to start.")
         }
         awaitingBegin = false
-        recorder.arm()
         do {
+            // The stream may have died during the countdown: report that error, not a generic one.
+            if let fatalError { throw fatalError }
+            recorder.arm()
             try await waitForFirstFrame(recorder)
             hub.set(.recording(startedAt: Date()))
         } catch {
@@ -128,8 +138,10 @@ public actor ScreenCaptureRecordingSession: WarmableRecordingSession {
     private func waitForFirstFrame(_ recorder: ScreenRecorder) async throws {
         // Give the first frame a moment so the caller returns with the origin already set.
         for _ in 0..<300 where !recorder.hasFirstFrame {
+            if let fatalError { throw fatalError }
             try? await Task.sleep(for: .milliseconds(10))
         }
+        if let fatalError { throw fatalError }
         if !recorder.hasFirstFrame {
             throw NSSError.io("No screen frames arrived. Check that the selected source is visible and try again.")
         }
