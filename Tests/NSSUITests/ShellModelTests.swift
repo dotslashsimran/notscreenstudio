@@ -133,6 +133,19 @@ import NSSCore
         #expect(rig.model.lastSaved == nil)
     }
 
+    @Test func failedProjectSaveKeepsTheFinishedRecording() async throws {
+        let rig = ShellRig()
+        defer { rig.cleanup() }
+        await rig.model.startRecording()
+        let bundle = try #require(rig.session.startedBundle)
+        // A directory where cursor.json belongs makes the save step fail after the session stopped fine.
+        try FileManager.default.createDirectory(at: bundle.appendingPathComponent("cursor.json/x"), withIntermediateDirectories: true)
+        await rig.model.stopRecording()
+        guard case .failed = rig.model.phase else { Issue.record("phase \(rig.model.phase)"); return }
+        #expect(FileManager.default.fileExists(atPath: bundle.path))
+        #expect(rig.logger.stopOrigin == 42) // stopped once with the real origin, not reset afterwards
+    }
+
     @Test func startFailureLeavesFailedPhaseAndNoEmptyBundle() async throws {
         let rig = ShellRig()
         defer { rig.cleanup() }

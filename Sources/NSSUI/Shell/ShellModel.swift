@@ -364,7 +364,11 @@ public final class ShellModel {
             let saved = try await finish(active, bubble: bubble)
             notice = "Recording stopped early. The partial recording was saved as \(saved.project.name)."
         } catch {
-            // `finish` already removed the bundle if the session produced nothing.
+            // `finish` removes the bundle only when the session produced nothing. If saving the project failed,
+            // the finished recording stays on disk, so say where.
+            if FileManager.default.fileExists(atPath: active.reference.url.path) {
+                notice = "Recording stopped early. The files are kept in \(active.reference.url.lastPathComponent), but the project could not be saved."
+            }
         }
     }
 
