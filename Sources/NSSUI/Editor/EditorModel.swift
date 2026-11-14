@@ -1,0 +1,242 @@
+import Foundation
+import NSSCore
+import NSSExport
+import Observation
+
+/// What changed, so the preview only rebuilds what it must.
+public enum EditorChange: Sendable, Equatable {
+    case style
+    case timeline
+    case project
+}
+
+/// Services the editor needs. Real modules are injected through these protocols.
+public struct EditorDependencies: Sendable {
+    public var store: any ProjectStore
+    public var motionFactory: MotionModelFactory
+    public var renderer: any FrameRenderer
+    public var exporter: any Exporter
+
+    public init(store: any ProjectStore, motionFactory: @escaping MotionModelFactory, renderer: any FrameRenderer, exporter: any Exporter) {
+        self.store = store
+        self.motionFactory = motionFactory
+        self.renderer = renderer
+        self.exporter = exporter
+    }
+}
+
+/// View model for one open project. All edits go through `apply` so they are undoable, refresh the
+/// preview and trigger an autosave.
+@MainActor
+@Observable
+public final class EditorModel {
+    public private(set) var project: Project
+    public let reference: ProjectReference
+    public let track: CursorTrack
+    public let dependencies: EditorDependencies
+    public let undoManager = UndoManager()
+
+    /// Playhead in seconds. Written by the preview / scrubbing, read by the timeline.
+    public var playhead: MediaTime = 0
+    public var isPlaying = false
+    public var selectedZoomID: UUID?
+    /// When set, the next click in the preview picks the manual focus for this zoom block.
+    public var pickingFocusFor: UUID?
+    /// Bumped on every undo/redo-able change so menus can refresh.
+    public private(set) var revision = 0
+
+    @ObservationIgnored public var changeHandler: ((EditorChange) -> Void)?
+    @ObservationIgnored private var gestureBase: Project?
+    @ObservationIgnored private var gestureName = ""
+
+    public init(project: Project, reference: ProjectReference, track: CursorTrack, dependencies: EditorDependencies) {
+        self.project = project
+        self.reference = reference
+        self.track = track
+        self.dependencies = dependencies
+        undoManager.groupsByEvent = false
+        undoManager.levelsOfUndo = 200
+    }
+
+    public var duration: MediaTime { project.assets.duration }
+    public var trim: TrimRange { project.timeline.trim }
+    public var trimStart: MediaTime { project.timeline.trim.start }
+    public var trimEnd: MediaTime { project.timeline.trim.resolvedEnd(duration: duration) }
+    public var sourceAspect: Double { project.assets.sourcePixelSize.aspect }
+
+    public var canUndo: Bool { _ = revision; return undoManager.canUndo }
+    public var canRedo: Bool { _ = revision; return undoManager.canRedo }
+
+    // MARK: Editing core
+
+    /// Applies `mutate` as one undoable step. Inside a gesture (`beginGesture`) the change is applied
+    /// live and recorded as a single undo step when the gesture ends.
+    public func apply(_ name: String, _ mutate: (inout Project) -> Void) {
+        var next = project
+        mutate(&next)
+        guard next != project else { return }
+        if gestureBase != nil {
+            commit(next)
+        } else {
+            replaceProject(with: next, actionName: name)
+        }
+    }
+
+    /// Start a continuous edit (slider drag, block drag). Call `endGesture` when done.
+    public func beginGesture(_ name: String) {
+        guard gestureBase == nil else { return }
+        gestureBase = project
+        gestureName = name
+    }
+
+    public func endGesture() {
+        guard let base = gestureBase else { return }
+        gestureBase = nil
+        guard base != project else { return }
+        registerUndo(restoring: base, actionName: gestureName)
+    }
+
+    private func replaceProject(with next: Project, actionName: String) {
+        registerUndo(restoring: project, actionName: actionName)
+        commit(next)
+    }
+
+    private func registerUndo(restoring old: Project, actionName: String) {
+        // One explicit group per user edit (groupsByEvent is off so behaviour doesn't depend on the run loop).
+        undoManager.beginUndoGrouping()
+        undoManager.registerUndo(withTarget: self) { target in
+            MainActor.assumeIsolated {
+                target.restore(old, actionName: actionName)
+            }
+        }
+        undoManager.setActionName(actionName)
+        undoManager.endUndoGrouping()
+        revision += 1
+    }
+
+    /// Restores `state`; the inverse is registered while undoing/redoing, which makes the step redoable (and vice versa).
+    private func restore(_ state: Project, actionName: String) {
+        let current = project
+        undoManager.registerUndo(withTarget: self) { target in
+            MainActor.assumeIsolated {
+                target.restore(current, actionName: actionName)
+            }
+        }
+        undoManager.setActionName(actionName)
+        commit(state)
+        revision += 1
+    }
+
+    private func commit(_ next: Project) {
+        let old = project
+        var next = next
+        next.modifiedAt = Date()
+        project = next
+        let change: EditorChange
+        if old.timeline != next.timeline || old.style.cursor != next.style.cursor || old.assets != next.assets {
+            change = .timeline
+        } else if old.style != next.style {
+            change = .style
+        } else {
+            change = .project
+        }
+        changeHandler?(change)
+        dependencies.store.scheduleAutosave(next, to: reference)
+    }
+
+    public func undo() { undoManager.undo(); revision += 1 }
+    public func redo() { undoManager.redo(); revision += 1 }
+
+    // MARK: Style (inspector bindings)
+
+    public func setStyle<V: Equatable>(_ keyPath: WritableKeyPath<Style, V>, _ value: V, name: String = "Change Style") {
+        apply(name) { $0.style[keyPath: keyPath] = value }
+    }
+
+    // MARK: Trim
+
+    public func setTrimStart(_ t: MediaTime) {
+        apply("Trim") { p in
+            p.timeline.trim = TrimEditing.settingStart(t, in: p.timeline.trim, duration: p.assets.duration)
+        }
+        playhead = TrimEditing.clamp(playhead, to: trim, duration: duration)
+    }
+
+    public func setTrimEnd(_ t: MediaTime) {
+        apply("Trim") { p in
+            p.timeline.trim = TrimEditing.settingEnd(t, in: p.timeline.trim, duration: p.assets.duration)
+        }
+        playhead = TrimEditing.clamp(playhead, to: trim, duration: duration)
+    }
+
+    // MARK: Zoom blocks
+
+    @discardableResult
+    public func addZoomBlock(at time: MediaTime? = nil) -> UUID? {
+        let t = time ?? playhead
+        guard let r = ZoomBlockEditing.adding(at: t, to: project.timeline.zoomBlocks, duration: duration) else { return nil }
+        apply("Add Zoom") { $0.timeline.zoomBlocks = r.blocks }
+        selectedZoomID = r.id
+        return r.id
+    }
+
+    public func moveZoomBlock(_ id: UUID, by delta: MediaTime, from base: [ZoomBlock]) {
+        apply("Move Zoom") { $0.timeline.zoomBlocks = ZoomBlockEditing.moving(id, by: delta, in: base, duration: $0.assets.duration) }
+    }
+
+    public func resizeZoomBlock(_ id: UUID, edge: ZoomBlockEditing.Edge, to t: MediaTime, from base: [ZoomBlock]) {
+        apply("Resize Zoom") { $0.timeline.zoomBlocks = ZoomBlockEditing.resizing(id, edge: edge, to: t, in: base, duration: $0.assets.duration) }
+    }
+
+    public func deleteZoomBlock(_ id: UUID) {
+        apply("Delete Zoom") { $0.timeline.zoomBlocks = ZoomBlockEditing.deleting(id, from: $0.timeline.zoomBlocks) }
+        if selectedZoomID == id { selectedZoomID = nil }
+        if pickingFocusFor == id { pickingFocusFor = nil }
+    }
+
+    public func setZoomScale(_ id: UUID, _ scale: Double) {
+        apply("Zoom Scale") { $0.timeline.zoomBlocks = ZoomBlockEditing.settingScale(id, to: scale, in: $0.timeline.zoomBlocks) }
+    }
+
+    public func setZoomFocus(_ id: UUID, _ focus: ZoomFocus) {
+        apply("Zoom Focus") { $0.timeline.zoomBlocks = ZoomBlockEditing.settingFocus(id, to: focus, in: $0.timeline.zoomBlocks) }
+    }
+
+    public func setAutoZoom(_ on: Bool) {
+        apply("Auto Zoom") { $0.timeline.autoZoomEnabled = on }
+    }
+
+    public var selectedZoom: ZoomBlock? {
+        guard let id = selectedZoomID else { return nil }
+        return project.timeline.zoomBlocks.first { $0.id == id }
+    }
+
+    // MARK: Preview interactions
+
+    /// Called with an output-normalized click point in the preview when picking a manual focus.
+    /// Returns true when the click was consumed.
+    public func pickFocus(atOutput p: NormalizedPoint, camera: CameraState) -> Bool {
+        guard let id = pickingFocusFor else { return false }
+        let aspect = project.style.aspectRatio.ratio
+        if let s = PreviewGeometry.sourcePoint(forOutput: p, outputAspect: aspect, sourceAspect: sourceAspect, padding: project.style.padding, camera: camera) {
+            setZoomFocus(id, .manual(s))
+        }
+        pickingFocusFor = nil
+        return true
+    }
+
+    public func moveCameraBubble(toOutput p: NormalizedPoint) {
+        let s = project.style
+        let c = PreviewGeometry.clampedBubbleCenter(p, size: s.camera.size, outputAspect: s.aspectRatio.ratio)
+        apply("Move Camera") { $0.style.camera.position = c }
+    }
+
+    // MARK: Playhead
+
+    public func seek(to t: MediaTime) {
+        playhead = TrimEditing.clamp(t, to: trim, duration: duration)
+    }
+
+    /// Frame time step in seconds for frame-stepping.
+    public var frameDuration: MediaTime { 1 / max(project.assets.frameRate, 1) }
+}
