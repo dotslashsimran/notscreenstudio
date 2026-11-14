@@ -5,7 +5,8 @@
 ## Using it
 
 ```swift
-let renderer = MetalRenderer.makeDefault(assetBaseURL: projectBundleURL)  // falls back to PassthroughRenderer without Metal
+// Falls back to PassthroughRenderer only when there is no Metal device; any other setup error is thrown.
+let renderer = try MetalRenderer.makeDefault(assetBaseURL: projectBundleURL)
 try renderer.render(screen: screenPB, camera: cameraPB, state: motion.frameState(at: t), style: project.style, into: outputPB)
 ```
 

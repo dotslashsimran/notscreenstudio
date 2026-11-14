@@ -320,6 +320,10 @@ struct MetalRendererTests {
         #expect(TB.bytes(a) == TB.bytes(b))
     }
 
+    @Test func makeDefaultReturnsMetalWhenADeviceExists() throws {
+        #expect(try MetalRenderer.makeDefault() is MetalRenderer)
+    }
+
     @Test func rejectsNonBGRABuffers() throws {
         var pb: CVPixelBuffer?
         CVPixelBufferCreate(nil, 16, 16, kCVPixelFormatType_32ARGB, [kCVPixelBufferIOSurfacePropertiesKey: [:] as [String: Any]] as CFDictionary, &pb)

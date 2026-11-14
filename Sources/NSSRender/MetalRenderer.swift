@@ -18,9 +18,12 @@ public final class MetalRenderer: FrameRenderer, @unchecked Sendable {
     /// Built-in wallpaper names for `Background.wallpaper(name:)`.
     public static var wallpaperNames: [String] { Wallpapers.names }
 
-    /// A `MetalRenderer` when Metal is available, otherwise the CPU `PassthroughRenderer`.
-    public static func makeDefault(assetBaseURL: URL? = nil) -> any FrameRenderer {
-        (try? MetalRenderer(assetBaseURL: assetBaseURL)) ?? PassthroughRenderer()
+    /// A `MetalRenderer`, or the CPU `PassthroughRenderer` ONLY when this Mac has no Metal device.
+    /// Any other setup failure (shader compile, command queue, texture cache, buffers) is thrown,
+    /// so an export never silently produces flat-colour frames.
+    public static func makeDefault(assetBaseURL: URL? = nil) throws -> any FrameRenderer {
+        guard let device = MTLCreateSystemDefaultDevice() else { return PassthroughRenderer() }
+        return try MetalRenderer(device: device, assetBaseURL: assetBaseURL)
     }
 
     public let device: MTLDevice
