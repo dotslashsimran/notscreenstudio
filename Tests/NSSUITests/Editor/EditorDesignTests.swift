@@ -1,4 +1,5 @@
 import Testing
+import NSSCore
 @testable import NSSUI
 
 @Suite struct EditorDesignTests {
@@ -34,5 +35,23 @@ import Testing
         #expect(InspectorFormat.percent(0.5) == "50%")
         #expect(InspectorFormat.multiplier(2) == "2.0×")
         #expect(InspectorFormat.degrees(45) == "45°")
+    }
+
+    @Test @MainActor func renamingTrimsAndIgnoresEmptyNames() {
+        let model = makeModel()
+        model.setProjectName("  My Demo  ")
+        #expect(model.project.name == "My Demo")
+        model.setProjectName("   ")
+        #expect(model.project.name == "My Demo")
+        model.undo()
+        #expect(model.project.name == "Demo")
+    }
+
+    @Test @MainActor func aspectRatioChangeIsUndoable() {
+        let model = makeModel()
+        model.setStyle(\.aspectRatio, .r9x16, name: "Aspect Ratio")
+        #expect(model.project.style.aspectRatio == .r9x16)
+        model.undo()
+        #expect(model.project.style.aspectRatio == .r16x9)
     }
 }

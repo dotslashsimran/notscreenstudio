@@ -153,8 +153,8 @@ public struct InspectorHint: View {
 
 /// Value formatters shared by the rows.
 public enum InspectorFormat {
-    public static let percent: (Double) -> String = { String(format: "%.0f%%", $0 * 100) }
-    public static let multiplier: (Double) -> String = { String(format: "%.1f×", $0) }
-    public static let degrees: (Double) -> String = { String(format: "%.0f°", $0) }
-    public static let tenthsPercent: (Double) -> String = { String(format: "%.1f%%", $0 * 100) }
+    public static let percent: @Sendable (Double) -> String = { String(format: "%.0f%%", $0 * 100) }
+    public static let multiplier: @Sendable (Double) -> String = { String(format: "%.1f×", $0) }
+    public static let degrees: @Sendable (Double) -> String = { String(format: "%.0f°", $0) }
+    public static let tenthsPercent: @Sendable (Double) -> String = { String(format: "%.1f%%", $0 * 100) }
 }
