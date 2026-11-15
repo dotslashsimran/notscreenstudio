@@ -89,6 +89,7 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
     private let plan: ScreenStreamPlan
     private let writer: SampleFileWriter
     private let origin: SharedOrigin
+    private let pause: PauseClock
     private let onFailure: @Sendable (NSSError) -> Void
     private let videoQueue = DispatchQueue(label: "nss.capture.screen.video", qos: .userInteractive)
     private let audioQueue = DispatchQueue(label: "nss.capture.screen.audio", qos: .userInitiated)
@@ -99,12 +100,13 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
     /// the recording at once, even if the screen is static and no new frame would otherwise arrive.
     private var gate: FrameGate<(CVImageBuffer, CMVideoFormatDescription)>
 
-    init(filter: SCContentFilter, plan: ScreenStreamPlan, url: URL, origin: SharedOrigin, armed: Bool = true,
+    init(filter: SCContentFilter, plan: ScreenStreamPlan, url: URL, origin: SharedOrigin, pause: PauseClock = PauseClock(), armed: Bool = true,
          onFailure: @escaping @Sendable (NSSError) -> Void) throws {
         self.filter = filter
         self.gate = FrameGate(armed: armed)
         self.plan = plan
         self.origin = origin
+        self.pause = pause
         self.onFailure = onFailure
         self.writer = try SampleFileWriter(url: url, fileType: .mov, context: .writer, onFailure: onFailure)
 
@@ -163,7 +165,8 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
             return endedHost
         }
         if already == nil, let stream = lock.withLock({ self.stream }) { try? await stream.stopCapture() }
-        let end = already ?? endHost
+        // End times are moved onto the pause-free timeline like every sample.
+        let end = pause.shift(already ?? endHost)
         let hadMedia = try await writer.finish(endHost: end)
         return ScreenResult(frames: hadMedia ? writer.sampleCount : 0, endHost: end)
     }
@@ -187,7 +190,8 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
             guard let o = origin.current, writer.isStarted else { return }
             let start = sampleBuffer.presentationTimeStamp.seconds
             if o.isEntirelyBefore(start: start, duration: sampleBuffer.duration.validOrZero.seconds) { return }
-            writer.append(sampleBuffer, to: "audio")
+            guard let shifted = pause.apply(to: sampleBuffer) else { return }
+            writer.append(shifted, to: "audio")
         default:
             break
         }
@@ -200,7 +204,9 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
             do { try writer.start(atOrigin: pts) } catch { onFailure(CaptureErrorMapper.map(error, context: .writer)); return }
         }
         guard let o = origin.current, pts >= o.hostTime else { return }
-        writer.append(sampleBuffer, to: "video")
+        // Frames inside a pause are dropped; later ones move earlier by the paused time so there is no gap.
+        guard let shifted = pause.apply(to: sampleBuffer) else { return }
+        writer.append(shifted, to: "video")
     }
 
     static func isCompleteFrame(_ sb: CMSampleBuffer) -> Bool {

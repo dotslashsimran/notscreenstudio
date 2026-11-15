@@ -24,7 +24,7 @@ public protocol WarmableRecordingSession: RecordingSession {
 
 /// Real `RecordingSession`: screen (SCStream) + optional mic and camera (AVCaptureSession), written
 /// into a bundle directory. All files share one time origin: the host-clock PTS of the first screen frame.
-public actor ScreenCaptureRecordingSession: WarmableRecordingSession {
+public actor ScreenCaptureRecordingSession: WarmableRecordingSession, PausableRecordingSession {
     private let hub = StateHub()
     private let events = EventHub()
 
@@ -32,6 +32,7 @@ public actor ScreenCaptureRecordingSession: WarmableRecordingSession {
     private var mic: DeviceRecorder?
     private var camera: DeviceRecorder?
     private var origin = SharedOrigin()
+    private var pauseClock = PauseClock()
     private var plan: ScreenStreamPlan?
     private var files: CaptureFilePlan?
     private var fatalError: NSSError?
@@ -110,6 +111,18 @@ public actor ScreenCaptureRecordingSession: WarmableRecordingSession {
         }
     }
 
+    public func pause() async throws {
+        guard case .recording = hub.current else { throw NSSError.unsupported("No recording is in progress.") }
+        pauseClock.pause(at: CaptureMath.hostNow())
+    }
+
+    public func resume() async throws {
+        guard case .recording = hub.current else { throw NSSError.unsupported("No recording is in progress.") }
+        pauseClock.resume(at: CaptureMath.hostNow())
+    }
+
+    public func pauseTimeline() async -> PauseTimeline { pauseClock.snapshot }
+
     public func cancelPrepared() async {
         guard awaitingBegin else { return }
         awaitingBegin = false
@@ -167,6 +180,7 @@ public actor ScreenCaptureRecordingSession: WarmableRecordingSession {
 
         self.bundleURL = bundleURL
         origin = SharedOrigin()
+        pauseClock = PauseClock()
         screenEndedEarly = false
         let files = CaptureFilePlan(options: options)
         self.files = files
@@ -204,20 +218,20 @@ public actor ScreenCaptureRecordingSession: WarmableRecordingSession {
         // Devices first (they warm up slowly). Their samples are dropped until the origin exists.
         if let id = options.micDeviceID, let name = files.mic {
             createdFiles.append(files.url(name, in: bundleURL))
-            let r = try DeviceRecorder(kind: .microphone, deviceID: id, url: files.url(name, in: bundleURL), origin: origin, onFailure: report(.microphone, false))
+            let r = try DeviceRecorder(kind: .microphone, deviceID: id, url: files.url(name, in: bundleURL), origin: origin, pause: pauseClock, onFailure: report(.microphone, false))
             try await r.start()
             mic = r
         }
         if let id = options.cameraDeviceID, let name = files.camera {
             createdFiles.append(files.url(name, in: bundleURL))
-            let r = try DeviceRecorder(kind: .camera, deviceID: id, url: files.url(name, in: bundleURL), origin: origin, onFailure: report(.camera, false))
+            let r = try DeviceRecorder(kind: .camera, deviceID: id, url: files.url(name, in: bundleURL), origin: origin, pause: pauseClock, onFailure: report(.camera, false))
             try await r.start()
             camera = r
         }
         createdFiles.append(files.url(files.screen, in: bundleURL))
         let recorder = try ScreenRecorder(
             filter: filter, plan: plan, url: files.url(files.screen, in: bundleURL),
-            origin: origin, armed: armed, onFailure: report(.screen, true))
+            origin: origin, pause: pauseClock, armed: armed, onFailure: report(.screen, true))
         screen = recorder
         try await recorder.start()
 

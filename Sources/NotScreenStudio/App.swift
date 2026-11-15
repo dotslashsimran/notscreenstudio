@@ -58,8 +58,20 @@ struct MenuBarLabel: View {
     var openPermissions: () -> Void
 
     var body: some View {
-        Image(systemName: model.menuBarSymbol)
-            .accessibilityLabel(model.isRecording ? "notscreenstudio, recording" : "notscreenstudio")
+        Group {
+            if model.isRecording, let title = model.menuBarTitle {
+                // A red record symbol and the running time while recording; a grey pause symbol when paused.
+                HStack(spacing: 4) {
+                    Image(systemName: model.isPaused ? "pause.circle.fill" : "record.circle.fill")
+                        .symbolRenderingMode(.palette)
+                        .foregroundStyle(model.isPaused ? Color.orange : Color.red, model.isPaused ? Color.orange : Color.red)
+                    Text(title).monospacedDigit()
+                }
+            } else {
+                Image(systemName: model.menuBarSymbol)
+            }
+        }
+            .accessibilityLabel(model.isRecording ? (model.isPaused ? "notscreenstudio, recording paused" : "notscreenstudio, recording") : "notscreenstudio")
             .task { await model.launch() }
             .onChange(of: model.editorRequestID) { openEditor() }
             .onChange(of: model.onboardingRequestID) { openPermissions() }
@@ -92,6 +104,6 @@ struct EditorWindowContent: View {
             HomeView(
                 library: library, isRecording: model.isRecording,
                 onOpen: { router.reference = $0 },
-                onRecord: { Task { await model.startRecording() } }))
+                onRecord: { model.beginSetup() }))
     }
 }

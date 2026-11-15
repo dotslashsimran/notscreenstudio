@@ -58,6 +58,7 @@ public struct MenuBarContent: View {
     @Bindable private var model: ShellModel
     private var openEditor: () -> Void
     private var openPermissions: () -> Void
+    @State private var menuWindow = MenuWindowBox()
 
     public init(
         model: ShellModel,
@@ -72,6 +73,7 @@ public struct MenuBarContent: View {
     public var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             recordButton
+            recordingControls
             banners
             Divider()
             sourceSection
@@ -86,6 +88,7 @@ public struct MenuBarContent: View {
         .padding(12)
         .frame(width: 300)
         .excludedFromCapture()
+        .background(MenuWindowReader(box: menuWindow).frame(width: 0, height: 0))
         .task { await model.refreshSources() }
     }
 
@@ -93,10 +96,13 @@ public struct MenuBarContent: View {
 
     private var recordButton: some View {
         Button {
-            if model.isCountingDown { model.cancelCountdown() } else { Task { await model.toggleRecording() } }
+            if model.isCountingDown { model.cancelCountdown() }
+            else if model.isRecording { Task { await model.stopRecording() } }
+            else if model.isSettingUp { model.cancelSetup() }
+            else { model.beginSetup(); menuWindow.close() }
         } label: {
             HStack {
-                Image(systemName: model.isRecording ? "stop.fill" : model.isCountingDown ? "xmark" : "record.circle.fill")
+                Image(systemName: model.isRecording ? "stop.fill" : (model.isCountingDown || model.isSettingUp) ? "xmark" : "record.circle.fill")
                 Text(recordTitle).fontWeight(.semibold)
                 Spacer()
                 Text(model.isRecording ? StopShortcut.display : model.sourceTitle)
@@ -107,15 +113,36 @@ public struct MenuBarContent: View {
         }
         .buttonStyle(.borderedProminent)
         .tint(.red)
-        .disabled(!model.canStart && !model.isRecording && !model.isCountingDown)
+        .disabled(!model.canStart && !model.isRecording && !model.isCountingDown && !model.isSettingUp)
+    }
+
+    @ViewBuilder private var recordingControls: some View {
+        if model.isRecording {
+            HStack(spacing: 8) {
+                if model.canPause {
+                    Button {
+                        Task { await model.togglePause() }
+                    } label: {
+                        Label(model.isPaused ? "Resume" : "Pause", systemImage: model.isPaused ? "play.fill" : "pause.fill")
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+                Button(role: .destructive) {
+                    Task { await model.discardRecording() }
+                } label: {
+                    Label("Discard", systemImage: "trash").frame(maxWidth: .infinity)
+                }
+            }
+            .controlSize(.regular)
+        }
     }
 
     private var recordTitle: String {
         switch model.phase {
-        case .recording: return "Stop Recording"
+        case .recording: return model.isPaused ? "Stop Recording (paused \(ElapsedFormat.string(model.elapsed)))" : "Stop Recording \(ElapsedFormat.string(model.elapsed))"
         case .preparing: return model.isCountingDown ? "Cancel Countdown" : "Starting…"
         case .saving: return "Saving…"
-        default: return "Record"
+        default: return model.isSettingUp ? "Close Recorder" : "Record"
         }
     }
 
@@ -139,19 +166,24 @@ public struct MenuBarContent: View {
             SectionTitle("Source")
             ForEach(model.listing.displays) { display in
                 SourceRow(title: display.name, systemImage: "display", selected: model.isSelected(display: display)) {
-                    model.selectSource(display.isMain ? nil : .display(id: display.id))
+                    model.pickSource(display.isMain ? nil : .display(id: display.id))
+                    menuWindow.close()
                 }
             }
             Menu {
                 if model.listing.windows.isEmpty { Text("No windows found") }
                 ForEach(model.listing.windows) { window in
-                    Button(window.displayName) { model.selectSource(.window(id: window.id)) }
+                    Button(window.displayName) {
+                        model.pickSource(.window(id: window.id))
+                        menuWindow.close()
+                    }
                 }
             } label: {
                 Label(selectedWindowTitle ?? "Window…", systemImage: "macwindow")
             }
             .menuStyle(.borderlessButton)
             Button {
+                menuWindow.close()
                 Task { await model.chooseArea() }
             } label: {
                 Label(selectedAreaTitle ?? "Select Area…", systemImage: "rectangle.dashed")
@@ -283,4 +315,25 @@ private struct Banner: View {
         .padding(8)
         .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
     }
+}
+
+/// Finds the menu bar popover's window so picking a source can close it.
+@MainActor
+final class MenuWindowBox {
+    weak var window: NSWindow?
+    func close() { window?.orderOut(nil) }
+}
+
+private struct MenuWindowReader: NSViewRepresentable {
+    let box: MenuWindowBox
+    final class Reader: NSView {
+        var box: MenuWindowBox?
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            let w = window
+            MainActor.assumeIsolated { box?.window = w }
+        }
+    }
+    func makeNSView(context: Context) -> Reader { let r = Reader(); r.box = box; return r }
+    func updateNSView(_ nsView: Reader, context: Context) { nsView.box = box }
 }
