@@ -118,7 +118,7 @@ public actor ScreenCaptureRecordingSession: WarmableRecordingSession, PausableRe
 
     public func resume() async throws {
         guard case .recording = hub.current else { throw NSSError.unsupported("No recording is in progress.") }
-        pauseClock.resume(at: CaptureMath.hostNow())
+        if let screen { screen.resume() } else { pauseClock.resume(at: CaptureMath.hostNow()) }
     }
 
     public func pauseTimeline() async -> PauseTimeline { pauseClock.snapshot }

@@ -99,6 +99,7 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
     /// While false (the countdown), frames are not written. The newest one is kept so `arm()` can start
     /// the recording at once, even if the screen is static and no new frame would otherwise arrive.
     private var gate: FrameGate<(CVImageBuffer, CMVideoFormatDescription)>
+    private var pausedHold = PausedFrameHold<(CVImageBuffer, CMVideoFormatDescription)>()
 
     init(filter: SCContentFilter, plan: ScreenStreamPlan, url: URL, origin: SharedOrigin, pause: PauseClock = PauseClock(), armed: Bool = true,
          onFailure: @escaping @Sendable (NSSError) -> Void) throws {
@@ -153,6 +154,20 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
         }
     }
 
+    /// Ends the pause and writes the newest frame seen during it, stamped at the resume time, so a screen that
+    /// changed while paused and then stays still is not left showing the pre-pause picture.
+    func resume() {
+        videoQueue.sync { [self] in
+            let now = CaptureMath.hostNow()
+            pause.resume(at: now)
+            let held = lock.withLock { pausedHold.take() }
+            guard let (image, format) = held else { return }
+            let timing = CMSampleTimingInfo(duration: .invalid, presentationTimeStamp: CaptureMath.hostTime(now), decodeTimeStamp: .invalid)
+            guard let sample = try? CMSampleBuffer(imageBuffer: image, formatDescription: format, sampleTiming: timing) else { return }
+            write(sample)
+        }
+    }
+
     /// Swaps the stream's filter while it runs (for windows that appeared after the stream started).
     func updateFilter(_ filter: SCContentFilter) async throws {
         guard let stream = lock.withLock({ self.stream }) else { return }
@@ -185,6 +200,12 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
                 return gate.isArmed
             }
             guard isArmed else { return }
+            if pause.isPaused {
+                if let image = sampleBuffer.imageBuffer, let format = sampleBuffer.formatDescription {
+                    lock.withLock { pausedHold.hold((image, format)) }
+                }
+                return
+            }
             write(sampleBuffer)
         case .audio:
             guard let o = origin.current, writer.isStarted else { return }
