@@ -161,6 +161,7 @@ struct EditorTopBar: View {
         HStack(spacing: EditorTheme.spacingLoose) {
             if let onBack {
                 Button {
+                    commitName()
                     // Write pending edits now so the home screen (name, thumbnail) sees them.
                     // Unchanged projects are not rewritten; a failed write is shown and keeps the editor open.
                     Task {
@@ -197,7 +198,7 @@ struct EditorTopBar: View {
             }
             .pickerStyle(.segmented).labelsHidden().frame(width: 150)
             .help("Output aspect ratio")
-            Button { export() } label: { Label("Export", systemImage: "square.and.arrow.up") }
+            Button { commitName(); export() } label: { Label("Export", systemImage: "square.and.arrow.up") }
                 .buttonStyle(.editorPrimary)
                 .keyboardShortcut("e", modifiers: .command)
         }
@@ -207,6 +208,7 @@ struct EditorTopBar: View {
     }
 
     private func commitName() {
+        nameFocused = false
         model.setProjectName(nameDraft)
         nameDraft = model.project.name
     }
