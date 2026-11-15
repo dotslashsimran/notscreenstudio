@@ -211,7 +211,18 @@ public struct SpringMotionModel: MotionModel {
         var frames: [SimFrame] = []
         frames.reserveCapacity(steps + 1)
 
+        // Zoom springs: the tuning's spring between blocks with no ease set, otherwise one spring per
+        // segment edge (ease-in from `start`, ease-out from `end`) with the segment's ease as response.
         let zoomStep = tuning.zoomSpring.stepper(dt: dt)
+        var zoomSteps: [SpringStepper] = []
+        zoomSteps.reserveCapacity(segments.count * 2)
+        for seg in segments {
+            var spring = tuning.zoomSpring
+            spring.response = seg.easeIn
+            zoomSteps.append(spring.stepper(dt: dt))
+            spring.response = seg.easeOut
+            zoomSteps.append(spring.stepper(dt: dt))
+        }
         let panStep = tuning.panSpring.stepper(dt: dt)
         let cursorSpring = tuning.cursorSpring(smoothing: cursorStyle.smoothing)
         let cursorStep = cursorSpring?.stepper(dt: dt)
@@ -254,7 +265,8 @@ public struct SpringMotionModel: MotionModel {
             let t = start + Double(k) * dt
             let raw = cursor.position(at: t)
             let target = planner.target(at: t, cursor: raw, currentScale: exp(logScale))
-            zoomStep.step(&logScale, &logScaleV, target: log(target.scale))
+            let zi = planner.zoomSpringIndex
+            (zi >= 0 && zi < zoomSteps.count ? zoomSteps[zi] : zoomStep).step(&logScale, &logScaleV, target: log(target.scale))
             panStep.step(&fx, &fxV, target: target.focus.x)
             panStep.step(&fy, &fyV, target: target.focus.y)
             if let raw {
@@ -307,6 +319,9 @@ struct CameraPlanner {
     var index = 0
     var active: Int? = nil
     var focus = NormalizedPoint.center
+    /// Which zoom spring the last `target` call asks for: `2 * i` = ease-in of segment i, `2 * i + 1` =
+    /// ease-out of segment i, -1 = the default spring (before the first segment).
+    private(set) var zoomSpringIndex = -1
 
     init(segments: [ZoomSegment], tuning: MotionTuning) {
         self.segments = segments
@@ -321,6 +336,7 @@ struct CameraPlanner {
     ///   between segments until the zoom-out has finished.
     mutating func target(at t: MediaTime, cursor: NormalizedPoint?, currentScale: Double) -> (scale: Double, focus: NormalizedPoint) {
         while index < segments.count, segments[index].end <= t { index += 1 }
+        zoomSpringIndex = index > 0 ? 2 * (index - 1) + 1 : -1
         guard index < segments.count else {
             active = nil
             return (1, focus)
@@ -336,6 +352,7 @@ struct CameraPlanner {
             }
             return (1, focus)
         }
+        zoomSpringIndex = 2 * index
         if active != index {
             active = index
             focus = Self.clampFocus(seg.initialFocus, scale: seg.scale)

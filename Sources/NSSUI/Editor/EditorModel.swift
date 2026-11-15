@@ -76,13 +76,22 @@ public final class EditorModel {
     static let coalescingWindow: TimeInterval = 0.6
 
     public init(project: Project, reference: ProjectReference, track: CursorTrack, dependencies: EditorDependencies) {
+        var project = project
+        let loaded = project
+        // Auto-zooms become stored blocks once, the first time a project opens (see `ZoomBlockEditing`).
+        if let migrated = ZoomBlockEditing.materializingAutoZooms(
+            project.timeline, track: track, duration: project.assets.duration, sourceAspect: project.assets.sourcePixelSize.aspect
+        ) {
+            project.timeline = migrated
+        }
         self.project = project
-        self.savedSnapshot = project
+        self.savedSnapshot = loaded
         self.reference = reference
         self.track = track
         self.dependencies = dependencies
         undoManager.groupsByEvent = false
         undoManager.levelsOfUndo = 200
+        if project != loaded { dependencies.store.scheduleAutosave(project, to: reference) }
     }
 
     public var duration: MediaTime { project.assets.duration }
@@ -209,48 +218,6 @@ public final class EditorModel {
             p.timeline.trim = TrimEditing.settingEnd(t, in: p.timeline.trim, duration: p.assets.duration)
         }
         playhead = TrimEditing.clamp(playhead, to: trim, duration: duration)
-    }
-
-    // MARK: Zoom blocks
-
-    @discardableResult
-    public func addZoomBlock(at time: MediaTime? = nil) -> UUID? {
-        let t = time ?? playhead
-        guard let r = ZoomBlockEditing.adding(at: t, to: project.timeline.zoomBlocks, duration: duration) else { return nil }
-        apply("Add Zoom") { $0.timeline.zoomBlocks = r.blocks }
-        selectedZoomID = r.id
-        return r.id
-    }
-
-    public func moveZoomBlock(_ id: UUID, by delta: MediaTime, from base: [ZoomBlock]) {
-        apply("Move Zoom") { $0.timeline.zoomBlocks = ZoomBlockEditing.moving(id, by: delta, in: base, duration: $0.assets.duration) }
-    }
-
-    public func resizeZoomBlock(_ id: UUID, edge: ZoomBlockEditing.Edge, to t: MediaTime, from base: [ZoomBlock]) {
-        apply("Resize Zoom") { $0.timeline.zoomBlocks = ZoomBlockEditing.resizing(id, edge: edge, to: t, in: base, duration: $0.assets.duration) }
-    }
-
-    public func deleteZoomBlock(_ id: UUID) {
-        apply("Delete Zoom") { $0.timeline.zoomBlocks = ZoomBlockEditing.deleting(id, from: $0.timeline.zoomBlocks) }
-        if selectedZoomID == id { selectedZoomID = nil }
-        if pickingFocusFor == id { pickingFocusFor = nil }
-    }
-
-    public func setZoomScale(_ id: UUID, _ scale: Double) {
-        apply("Zoom Scale") { $0.timeline.zoomBlocks = ZoomBlockEditing.settingScale(id, to: scale, in: $0.timeline.zoomBlocks) }
-    }
-
-    public func setZoomFocus(_ id: UUID, _ focus: ZoomFocus) {
-        apply("Zoom Focus") { $0.timeline.zoomBlocks = ZoomBlockEditing.settingFocus(id, to: focus, in: $0.timeline.zoomBlocks) }
-    }
-
-    public func setAutoZoom(_ on: Bool) {
-        apply("Auto Zoom") { $0.timeline.autoZoomEnabled = on }
-    }
-
-    public var selectedZoom: ZoomBlock? {
-        guard let id = selectedZoomID else { return nil }
-        return project.timeline.zoomBlocks.first { $0.id == id }
     }
 
     // MARK: Preview interactions

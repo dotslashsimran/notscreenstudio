@@ -210,7 +210,7 @@ import NSSMotion
         m.changeHandler = { seen.append($0) }
         m.setStyle(\.padding, 0.1)
         m.setStyle(\.cursor.size, 3)
-        m.setAutoZoom(false)
+        m.removeAllAutoZooms()
         #expect(seen == [.style, .timeline, .timeline])
     }
 
