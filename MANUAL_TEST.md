@@ -139,3 +139,25 @@ Open each recording in the editor and check the following.
 
 28. In the repo run `swift test -j 2`. Optionally run `NSS_E2E_4K=1 swift test -j 2 --filter EndToEndExportTests` for the 4K exports, and `NSS_BENCH=1 swift test -j 2 --filter PreviewPerformanceTests` for the preview timing budget. `swift test -j 2 --filter ParityTests` prints the export-versus-preview numbers, `--filter EdgeGapTests` checks the corner and edge clicks, and `NSS_BENCH=1 ... --filter PreviewPerformanceTests` prints the frame time report.
     - Good: all tests pass.
+
+## Round 3: Editor layout and design system
+
+R3D-1. Open a recording in the editor.
+    - Good: dark theme everywhere. Top bar with Recordings button, editable project name, undo/redo, a 16:9 / 1:1 / 9:16 picker and a blue Export button. Preview in the centre, inspector on the right, timeline across the bottom.
+R3D-2. Click the project name, type a new name and press Return. Press Cmd-Z.
+    - Good: the name changes, then changes back. After going to Recordings, the home grid shows the current name. An empty name is ignored.
+    - Good: while the name field is being edited, typing a space does not play or pause, the arrow keys move the caret and do not step frames, and Cmd-Z undoes typing rather than the last edit. After Return the field loses focus, and Cmd-Z then reverts the name and the field shows the old name.
+R3D-3. Switch the aspect ratio picker between 16:9, 1:1 and 9:16.
+    - Good: the preview reshapes at once. Export at each and check the file has that shape.
+R3D-4. Look at the inspector.
+    - Good: sections in order Background, Frame, Cursor, Zoom, Camera, Audio, each with an icon and chevron. Click a header to collapse or expand; the state is remembered after quitting. All sliders, toggles and colour wells look the same across sections.
+R3D-5. Drag a slider, then press Cmd-Z.
+    - Good: the whole drag undoes in one step.
+R3D-6. Look at the timeline.
+    - Good: labelled tracks Video, Zoom, Camera, Audio. Video shows thumbnails with yellow trim handles and orange click dots. Camera and Audio show a block when the recording has them, otherwise a short note.
+R3D-7. Double-click the Zoom track, then drag the block's middle, its left edge and its right edge. Press Delete.
+    - Good: middle moves, edges resize, the block is purple and gets a white outline when selected. Delete removes it.
+R3D-8. Drag the playhead, play, trim the start and end.
+    - Good: playhead stays smooth, trim still works, playback stays at 60 fps.
+R3D-9. Open Export… and the home screen.
+    - Good: both use the same dark theme, button styles and spacing as the editor.

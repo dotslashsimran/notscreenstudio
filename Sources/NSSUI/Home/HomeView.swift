@@ -35,6 +35,8 @@ public struct HomeView: View {
             }
         }
         .frame(minWidth: 720, minHeight: 480)
+        .background(EditorTheme.canvas)
+        .preferredColorScheme(.dark)
         .task { await model.reload() }
         // Pick up recordings finished while this window stays open.
         .onChange(of: isRecording) { _, now in if !now { Task { await model.reload() } } }
@@ -75,7 +77,7 @@ public struct HomeView: View {
             Text("Record your screen and it will show up here.")
         } actions: {
             Button(action: onRecord) { Label("Record", systemImage: "record.circle") }
-                .buttonStyle(.borderedProminent).controlSize(.large).disabled(isRecording)
+                .buttonStyle(.editorPrimary).disabled(isRecording)
         }
     }
 
@@ -109,7 +111,7 @@ struct HomeTile: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             ZStack {
-                Rectangle().fill(Color.black.opacity(0.35))
+                Rectangle().fill(EditorTheme.surface)
                 if let image {
                     Image(nsImage: image).resizable().aspectRatio(contentMode: .fill)
                 } else if failed {
@@ -119,7 +121,8 @@ struct HomeTile: View {
                 }
             }
             .aspectRatio(16.0 / 10.0, contentMode: .fit)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .clipShape(RoundedRectangle(cornerRadius: EditorTheme.radiusMedium))
+            .overlay(RoundedRectangle(cornerRadius: EditorTheme.radiusMedium).strokeBorder(EditorTheme.stroke))
             .overlay(alignment: .bottomTrailing) {
                 Text(HomeModel.durationLabel(summary.duration))
                     .font(.caption2.monospacedDigit()).foregroundStyle(.white)
@@ -127,9 +130,9 @@ struct HomeTile: View {
                     .background(.black.opacity(0.65), in: Capsule()).padding(6)
             }
             VStack(alignment: .leading, spacing: 2) {
-                Text(summary.name).font(.headline).lineLimit(1)
+                Text(summary.name).editorLabel(.header).lineLimit(1)
                 Text(summary.createdAt.formatted(date: .abbreviated, time: .shortened))
-                    .font(.caption).foregroundStyle(.secondary)
+                    .editorLabel(.caption)
             }
         }
         .contentShape(Rectangle())

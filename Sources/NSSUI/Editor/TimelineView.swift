@@ -1,38 +1,56 @@
 import SwiftUI
 import NSSCore
 
-/// Timeline: ruler, thumbnail strip with trim handles, click markers, zoom track and playhead.
+/// Timeline: ruler plus four labelled tracks (Video, Zoom, Camera, Audio) and one playhead across them.
+/// Every block on every track is drawn with `TrackBlockBackground` and uses `TrackBlockStyle` hit zones.
 struct EditorTimelineView: View {
     let model: EditorModel
     let thumbnails: ThumbnailStore
     let seek: (MediaTime) -> Void
 
     @State private var blockDragBase: [ZoomBlock]?
+    @State private var blockDragZone: TrackBlockStyle.HitZone?
+    @State private var selectedStatic: TimelineTrackKind?
     /// Resets to false when a drag ends OR is cancelled (system interruption), unlike `onEnded`.
     @GestureState private var scrubbing = false
     private let space = "timelineTrack"
     private let rulerH: CGFloat = 22
-    private let stripH: CGFloat = 48
-    private let markerH: CGFloat = 14
-    private let zoomH: CGFloat = 36
+    private let videoH: CGFloat = 52
+    private let trackH = TrackBlockStyle.trackHeight
+    private let gap: CGFloat = 4
+    private let labelW: CGFloat = 76
+
+    private var totalHeight: CGFloat { rulerH + videoH + 3 * trackH + 4 * gap }
 
     var body: some View {
-        GeometryReader { geo in
-            let g = TimelineGeometry(duration: model.duration, width: geo.size.width)
-            ZStack(alignment: .topLeading) {
-                VStack(spacing: 0) {
-                    ruler(g).frame(height: rulerH)
-                    strip(g).frame(height: stripH)
-                    clickMarkers(g).frame(height: markerH)
-                    zoomTrack(g).frame(height: zoomH)
-                }
-                playhead(g)
+        HStack(alignment: .top, spacing: 0) {
+            VStack(spacing: gap) {
+                Color.clear.frame(height: rulerH)
+                TrackLabel(.video).frame(height: videoH)
+                TrackLabel(.zoom).frame(height: trackH)
+                TrackLabel(.camera).frame(height: trackH)
+                TrackLabel(.audio).frame(height: trackH)
             }
-            .coordinateSpace(name: space)
-            .contentShape(Rectangle())
+            .frame(width: labelW)
+            GeometryReader { geo in
+                let g = TimelineGeometry(duration: model.duration, width: geo.size.width)
+                ZStack(alignment: .topLeading) {
+                    VStack(spacing: gap) {
+                        ruler(g).frame(height: rulerH)
+                        videoTrack(g).frame(height: videoH)
+                        zoomTrack(g).frame(height: trackH)
+                        staticTrack(.camera, present: model.project.assets.cameraFile != nil, g: g, emptyText: "No camera in this recording")
+                        staticTrack(.audio, present: model.project.assets.micFile != nil, g: g, emptyText: "No audio in this recording")
+                    }
+                    playhead(g)
+                }
+                .coordinateSpace(name: space)
+                .contentShape(Rectangle())
+            }
         }
-        .frame(height: rulerH + stripH + markerH + zoomH + 8)
+        .frame(height: totalHeight)
         .focusable()
+        .focusEffectDisabled()
         .onKeyPress(.delete) { deleteSelected() }
         .onKeyPress(.deleteForward) { deleteSelected() }
         .onChange(of: scrubbing) { _, now in if !now { model.endScrub() } }
@@ -56,8 +74,8 @@ struct EditorTimelineView: View {
                 var p = Path()
                 p.move(to: CGPoint(x: x, y: size.height - 7))
                 p.addLine(to: CGPoint(x: x, y: size.height))
-                ctx.stroke(p, with: .color(.secondary), lineWidth: 1)
-                ctx.draw(Text(TimelineGeometry.label(for: t)).font(.system(size: 9).monospacedDigit()).foregroundStyle(.secondary),
+                ctx.stroke(p, with: .color(EditorTheme.textTertiary), lineWidth: 1)
+                ctx.draw(Text(TimelineGeometry.label(for: t)).font(.system(size: 9).monospacedDigit()).foregroundStyle(EditorTheme.textSecondary),
                          at: CGPoint(x: x + 3, y: 8), anchor: .leading)
                 t += step
             }
@@ -77,35 +95,37 @@ struct EditorTimelineView: View {
             .onEnded { _ in model.endScrub() }
     }
 
-    // MARK: Thumbnails + trim
+    // MARK: Video track (thumbnails, trim, click markers)
 
-    private func strip(_ g: TimelineGeometry) -> some View {
+    private func videoTrack(_ g: TimelineGeometry) -> some View {
         ZStack(alignment: .leading) {
             Color.black.opacity(0.35)
             ForEach(thumbnails.thumbs) { th in
                 let w = g.width / 24
                 Image(decorative: th.image, scale: 1)
                     .resizable().aspectRatio(contentMode: .fill)
-                    .frame(width: w, height: stripH).clipped()
+                    .frame(width: w, height: videoH).clipped()
                     .offset(x: g.x(for: th.time) - w / 2)
             }
             // Dim trimmed-away regions.
             let sx = g.x(for: model.trimStart), ex = g.x(for: model.trimEnd)
             Rectangle().fill(.black.opacity(0.6)).frame(width: max(sx, 0)).frame(maxWidth: .infinity, alignment: .leading)
             Rectangle().fill(.black.opacity(0.6)).frame(width: max(g.width - ex, 0)).frame(maxWidth: .infinity, alignment: .trailing)
-            Rectangle().strokeBorder(Color.yellow, lineWidth: 2)
+            Rectangle().strokeBorder(EditorTheme.trim, lineWidth: 2)
                 .frame(width: max(ex - sx, 0)).offset(x: sx).allowsHitTesting(false)
+            clickMarkers(g).frame(height: 10).frame(maxHeight: .infinity, alignment: .bottom)
             trimHandle(x: sx, isStart: true, g: g)
             trimHandle(x: ex, isStart: false, g: g)
         }
-        .clipShape(RoundedRectangle(cornerRadius: 4))
+        .clipShape(RoundedRectangle(cornerRadius: TrackBlockStyle.cornerRadius))
+        .overlay(RoundedRectangle(cornerRadius: TrackBlockStyle.cornerRadius).strokeBorder(TimelineTrackKind.video.tint.opacity(0.6)))
         .contentShape(Rectangle())
-                .gesture(scrubGesture(g))
+        .gesture(scrubGesture(g))
     }
 
     private func trimHandle(x: Double, isStart: Bool, g: TimelineGeometry) -> some View {
-        RoundedRectangle(cornerRadius: 2).fill(Color.yellow)
-            .frame(width: 8, height: stripH)
+        RoundedRectangle(cornerRadius: 2).fill(EditorTheme.trim)
+            .frame(width: 8, height: videoH)
             .offset(x: x - (isStart ? 8 : 0))
             .gesture(
                 DragGesture(minimumDistance: 0, coordinateSpace: .named(space))
@@ -118,8 +138,6 @@ struct EditorTimelineView: View {
             )
             .help(isStart ? "Trim start" : "Trim end")
     }
-
-    // MARK: Click markers
 
     private func clickMarkers(_ g: TimelineGeometry) -> some View {
         Canvas { ctx, size in
@@ -135,73 +153,79 @@ struct EditorTimelineView: View {
 
     private func zoomTrack(_ g: TimelineGeometry) -> some View {
         ZStack(alignment: .topLeading) {
-            RoundedRectangle(cornerRadius: 4).fill(Color.primary.opacity(0.06))
+            TrackRail()
                 .onTapGesture(count: 2, coordinateSpace: .named(space)) { loc in
                     model.addZoomBlock(at: g.time(forX: loc.x))
                 }
-                .onTapGesture { model.selectedZoomID = nil }
+                .onTapGesture { model.selectedZoomID = nil; selectedStatic = nil }
             ForEach(model.project.timeline.zoomBlocks) { block in
                 zoomBlockView(block, g: g)
             }
         }
         .overlay(alignment: .leading) {
             if model.project.timeline.zoomBlocks.isEmpty {
-                Text("Double-click to add a zoom").font(.caption2).foregroundStyle(.tertiary).padding(.leading, 8).allowsHitTesting(false)
+                Text("Double-click to add a zoom").editorLabel(.caption).opacity(0.7).padding(.leading, 8).allowsHitTesting(false)
             }
         }
     }
 
+    /// One gesture for the whole block: where the press lands (`TrackBlockStyle.hitZone`) decides between
+    /// moving the block and dragging its start or end edge.
     private func zoomBlockView(_ block: ZoomBlock, g: TimelineGeometry) -> some View {
         let x = g.x(for: block.start)
-        let w = max(g.x(for: block.end) - x, 4)
+        let w = TrackBlockStyle.displayWidth(g.x(for: block.end) - x)
         let selected = block.id == model.selectedZoomID
         return ZStack {
-            RoundedRectangle(cornerRadius: 5)
-                .fill(Color.accentColor.opacity(selected ? 0.85 : 0.55))
-                .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(selected ? Color.white : .clear, lineWidth: 1.5))
+            TrackBlockBackground(kind: .zoom, selected: selected, showsGrips: true)
             Text(String(format: "%.1f×", block.scale) + (block.focus == .auto ? "" : " ⌖"))
-                .font(.caption2.weight(.semibold)).foregroundStyle(.white).lineLimit(1)
+                .font(.system(size: 10, weight: .semibold)).foregroundStyle(.white).lineLimit(1)
         }
-        .frame(width: w, height: zoomH - 6)
-        .overlay(alignment: .leading) { edgeHandle(block, edge: .start, g: g) }
-        .overlay(alignment: .trailing) { edgeHandle(block, edge: .end, g: g) }
-        .offset(x: x, y: 3)
-        .onTapGesture { model.selectedZoomID = block.id }
+        .frame(width: w, height: TrackBlockStyle.blockHeight)
+        .contentShape(Rectangle())
+        .offset(x: x, y: TrackBlockStyle.blockInset)
+        .onTapGesture { model.selectedZoomID = block.id; selectedStatic = nil }
         .gesture(
-            DragGesture(minimumDistance: 3, coordinateSpace: .named(space))
+            DragGesture(minimumDistance: TrackBlockStyle.dragThreshold, coordinateSpace: .named(space))
                 .onChanged { v in
                     if blockDragBase == nil {
                         blockDragBase = model.project.timeline.zoomBlocks
+                        blockDragZone = TrackBlockStyle.hitZone(atX: v.startLocation.x - x, blockWidth: w)
                         model.selectedZoomID = block.id
-                        model.beginGesture("Move Zoom")
+                        model.beginGesture(blockDragZone == .body ? "Move Zoom" : "Resize Zoom")
                     }
-                    model.moveZoomBlock(block.id, by: v.translation.width / g.pixelsPerSecond, from: blockDragBase ?? [])
+                    let base = blockDragBase ?? []
+                    switch blockDragZone ?? .body {
+                    case .body: model.moveZoomBlock(block.id, by: v.translation.width / g.pixelsPerSecond, from: base)
+                    case .startEdge: model.resizeZoomBlock(block.id, edge: .start, to: g.time(forX: v.location.x), from: base)
+                    case .endEdge: model.resizeZoomBlock(block.id, edge: .end, to: g.time(forX: v.location.x), from: base)
+                    }
                 }
                 .onEnded { _ in
                     blockDragBase = nil
+                    blockDragZone = nil
                     model.endGesture()
                 }
         )
     }
 
-    private func edgeHandle(_ block: ZoomBlock, edge: ZoomBlockEditing.Edge, g: TimelineGeometry) -> some View {
-        Rectangle().fill(Color.white.opacity(0.001)).frame(width: 8)
-            .overlay(Capsule().fill(.white.opacity(0.8)).frame(width: 2, height: 14))
-            .gesture(
-                DragGesture(minimumDistance: 0, coordinateSpace: .named(space))
-                    .onChanged { v in
-                        if blockDragBase == nil {
-                            blockDragBase = model.project.timeline.zoomBlocks
-                            model.selectedZoomID = block.id
-                            model.beginGesture("Resize Zoom")
-                        }
-                        model.resizeZoomBlock(block.id, edge: edge, to: g.time(forX: v.location.x), from: blockDragBase ?? [])
-                    }
-                    .onEnded { _ in
-                        blockDragBase = nil
-                        model.endGesture()
-                    }
-            )
+    // MARK: Camera and audio tracks (one full-length block each)
+
+    private func staticTrack(_ kind: TimelineTrackKind, present: Bool, g: TimelineGeometry, emptyText: String) -> some View {
+        ZStack(alignment: .leading) {
+            TrackRail()
+            if present {
+                ZStack {
+                    TrackBlockBackground(kind: kind, selected: selectedStatic == kind)
+                    Text(kind == .camera ? "Camera" : "Microphone").font(.system(size: 10, weight: .semibold)).foregroundStyle(.white).lineLimit(1)
+                }
+                .frame(width: g.width, height: TrackBlockStyle.blockHeight)
+                .padding(.vertical, TrackBlockStyle.blockInset)
+                .contentShape(Rectangle())
+                .onTapGesture { selectedStatic = kind; model.selectedZoomID = nil }
+            } else {
+                Text(emptyText).editorLabel(.caption).opacity(0.7).padding(.leading, 8).allowsHitTesting(false)
+            }
+        }
     }
 
     // MARK: Playhead
@@ -220,8 +244,8 @@ private struct PlayheadLine: View {
     var body: some View {
         let x = geometry.x(for: model.displayPlayhead)
         ZStack(alignment: .top) {
-            Rectangle().fill(Color.red).frame(width: 1.5)
-            Image(systemName: "arrowtriangle.down.fill").font(.system(size: 9)).foregroundStyle(.red).offset(y: -1)
+            Rectangle().fill(EditorTheme.playhead).frame(width: 1.5)
+            Image(systemName: "arrowtriangle.down.fill").font(.system(size: 9)).foregroundStyle(EditorTheme.playhead).offset(y: -1)
         }
         .frame(width: 12)
         .offset(x: x - 6)

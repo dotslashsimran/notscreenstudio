@@ -186,6 +186,15 @@ public final class EditorModel {
         apply(name, coalescingKey: coalescingKey) { $0.style[keyPath: keyPath] = value }
     }
 
+    // MARK: Project name
+
+    /// Trimmed, non-empty names only; an empty name keeps the old one.
+    public func setProjectName(_ raw: String) {
+        let name = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, name != project.name else { return }
+        apply("Rename Project") { $0.name = name }
+    }
+
     // MARK: Trim
 
     public func setTrimStart(_ t: MediaTime) {
