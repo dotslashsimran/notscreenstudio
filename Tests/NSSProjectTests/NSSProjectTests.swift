@@ -202,7 +202,11 @@ func settle(_ check: () -> Bool) async {
         var obj = try JSONSerialization.jsonObject(with: JSONEncoder().encode(sampleProject())) as! [String: Any]
         obj.removeValue(forKey: "schemaVersion")
         let data = try JSONSerialization.data(withJSONObject: obj)
-        #expect(try current.migrate(data) == data)
+        let migrated = try JSONSerialization.jsonObject(with: current.migrate(data)) as! [String: Any]
+        #expect(migrated["schemaVersion"] as? Int == Project.currentSchemaVersion, "a missing version is v1 and is migrated")
+        obj["schemaVersion"] = Project.currentSchemaVersion
+        let currentData = try JSONSerialization.data(withJSONObject: obj)
+        #expect(try current.migrate(currentData) == currentData)
 
         obj["schemaVersion"] = Project.currentSchemaVersion + 1
         #expect(throws: ProjectMigrationError.newerSchema(found: Project.currentSchemaVersion + 1, supported: Project.currentSchemaVersion)) {

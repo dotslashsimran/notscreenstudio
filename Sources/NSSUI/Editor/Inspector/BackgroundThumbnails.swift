@@ -50,11 +50,18 @@ public actor BackgroundThumbnails {
 
     /// Thumbnail of a colour or gradient background at `width` x `height` pixels.
     public func thumbnail(for background: Background, width: Int, height: Int) -> CGImage? {
-        let key = "bg:\(width)x\(height):" + ((try? JSONEncoder().encode(background)).map { String(decoding: $0, as: UTF8.self) } ?? "")
+        let key = "bg:\(width)x\(height):" + ((try? Self.keyEncoder.encode(background)).map { String(decoding: $0, as: UTF8.self) } ?? "")
         if let hit = memory[key] { return hit }
         guard let image = BackgroundRasterizer.cgImage(background, width: width, height: height) else { return nil }
         return remember(image, key)
     }
+
+    /// Sorted keys: the same background must always give the same cache key.
+    private static let keyEncoder: JSONEncoder = {
+        let e = JSONEncoder()
+        e.outputFormatting = .sortedKeys
+        return e
+    }()
 
     private func remember(_ image: CGImage, _ key: String) -> CGImage {
         if memory[key] == nil { order.append(key) }
