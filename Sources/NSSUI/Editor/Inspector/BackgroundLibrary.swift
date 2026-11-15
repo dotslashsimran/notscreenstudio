@@ -95,25 +95,52 @@ public struct RecentBackgroundImages: Sendable {
         defaults.set(try? JSONEncoder().encode(entries), forKey: Self.defaultsKey)
     }
 
-    /// Most recent first, only files that still exist.
-    public func load() -> [URL] {
-        entries().compactMap { e in
-            if let bm = e.bookmark, let url = Self.resolve(bm), FileManager.default.fileExists(atPath: url.path) { return url }
-            return FileManager.default.fileExists(atPath: e.path) ? URL(fileURLWithPath: e.path) : nil
+    /// Each entry with its current location: the bookmark's target when it resolves to an existing file
+    /// (so a moved or renamed file is followed), else the stored path if that file exists, else nil.
+    /// This one location is the entry's identity for `load`, `add` and `remove`.
+    private func resolvedEntries() -> [(entry: Entry, path: String?)] {
+        let fm = FileManager.default
+        return entries().map { e in
+            if let bm = e.bookmark, let url = Self.resolve(bm) {
+                let p = url.standardizedFileURL.path
+                if fm.fileExists(atPath: p) { return (e, p) }
+            }
+            return (e, fm.fileExists(atPath: e.path) ? e.path : nil)
         }
     }
 
-    /// Moves `url` to the front (no duplicates) and keeps at most `limit` entries.
+    /// Most recent first, only files that still exist, one per file.
+    public func load() -> [URL] {
+        var seen = Set<String>()
+        return resolvedEntries().compactMap { r in
+            guard let p = r.path, seen.insert(p).inserted else { return nil }
+            return URL(fileURLWithPath: p)
+        }
+    }
+
+    /// Moves `url` to the front (no duplicates, also of entries whose bookmark now points at it) and keeps
+    /// at most `limit` entries. Kept entries are rewritten with their current path.
     public func add(_ url: URL) {
-        let path = url.standardizedFileURL.path
-        var list = entries().filter { $0.path != path }
-        list.insert(Entry(path: path, bookmark: Self.bookmark(url)), at: 0)
+        let target = url.standardizedFileURL.path
+        var list = others(than: target)
+        list.insert(Entry(path: target, bookmark: Self.bookmark(url)), at: 0)
         write(Array(list.prefix(max(limit, 0))))
     }
 
+    /// Removes every entry for `url`, matched by its current location or its stored path.
     public func remove(_ url: URL) {
-        let path = url.standardizedFileURL.path
-        write(entries().filter { $0.path != path })
+        write(others(than: url.standardizedFileURL.path))
+    }
+
+    /// Entries that are not `target`, updated to their current path; entries for missing files are kept as
+    /// they are (the file may come back, for example on an external disk).
+    private func others(than target: String) -> [Entry] {
+        resolvedEntries().compactMap { r in
+            if r.entry.path == target || r.path == target { return nil }
+            var e = r.entry
+            if let p = r.path { e.path = p }
+            return e
+        }
     }
 
     private static func bookmark(_ url: URL) -> Data? {

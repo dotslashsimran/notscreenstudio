@@ -68,6 +68,31 @@ struct BackgroundPickerTests {
         #expect(RecentBackgroundImages(suiteName: suite).load().map(\.lastPathComponent) == ["img1.png"])
     }
 
+    @Test func recentsFollowAMovedFileWithOneIdentity() throws {
+        let dir = try tempDir()
+        let suite = "nss-test-recents-\(UUID().uuidString)"
+        defer {
+            try? FileManager.default.removeItem(at: dir)
+            UserDefaults().removePersistentDomain(forName: suite)
+        }
+        let store = RecentBackgroundImages(suiteName: suite)
+        let old = dir.appendingPathComponent("before.png"), other = dir.appendingPathComponent("other.png")
+        try touch(old); try touch(other)
+        store.add(old)
+        store.add(other)
+        let moved = dir.appendingPathComponent("sub/after.png")
+        try FileManager.default.createDirectory(at: moved.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.moveItem(at: old, to: moved)
+
+        let names = { store.load().map(\.lastPathComponent) }
+        #expect(names() == ["other.png", "after.png"], "the bookmark follows the move, one entry")
+        store.add(moved)
+        #expect(names() == ["after.png", "other.png"], "re-adding the moved file does not duplicate it")
+        #expect(store.load().count == Set(store.load().map(\.path)).count)
+        store.remove(store.load()[0])
+        #expect(names() == ["other.png"], "removing the moved file removes it for good")
+    }
+
     @Test func importCopiesIntoTheBundleWithAContentHashedName() throws {
         let dir = try tempDir(), bundle = try tempDir()
         defer { try? FileManager.default.removeItem(at: dir); try? FileManager.default.removeItem(at: bundle) }
