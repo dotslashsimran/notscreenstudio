@@ -34,15 +34,13 @@ struct BackgroundPicker: View {
     private let recentStore = RecentBackgroundImages()
     private var background: Background { model.project.style.background }
     private var currentTab: BackgroundTab { tab ?? BackgroundTab(for: background) }
-    private let columns = [GridItem(.adaptive(minimum: 58, maximum: 80), spacing: 8)]
+    private let columns = [GridItem(.adaptive(minimum: 58, maximum: 80), spacing: EditorTheme.spacing)]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Picker("Background", selection: Binding(get: { currentTab }, set: { tab = $0 })) {
-                ForEach(BackgroundTab.allCases) { Text($0.rawValue).tag($0) }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
+        VStack(alignment: .leading, spacing: EditorTheme.spacingLoose) {
+            InspectorSegmentedRow(
+                selection: Binding(get: { currentTab }, set: { tab = $0 }),
+                options: BackgroundTab.allCases.map { ($0, $0.rawValue) })
 
             switch currentTab {
             case .wallpapers: wallpaperGrid
@@ -53,7 +51,7 @@ struct BackgroundPicker: View {
 
             if currentTab.hasBlur {
                 EditSlider(model: model, title: "Blur", value: model.styleBinding(\.backgroundBlur, name: "Background Blur"),
-                           range: 0...1, format: { String(format: "%.0f%%", $0 * 100) })
+                           range: 0...1, format: InspectorFormat.percent)
                     .disabled(!background.isImageBased)
                     .opacity(background.isImageBased ? 1 : 0.4)
             }
@@ -68,9 +66,9 @@ struct BackgroundPicker: View {
     @ViewBuilder private var wallpaperGrid: some View {
         if let wallpapers {
             if wallpapers.isEmpty {
-                Text("No macOS wallpapers were found on this Mac.").font(.caption).foregroundStyle(.secondary)
+                InspectorHint("No macOS wallpapers were found on this Mac.")
             } else {
-                LazyVGrid(columns: columns, spacing: 8) {
+                LazyVGrid(columns: columns, spacing: EditorTheme.spacing) {
                     ForEach(wallpapers) { w in
                         let bg = Background.systemWallpaper(path: w.url.path)
                         ThumbnailTile(source: .file(w.url), selected: background == bg, help: w.name) {
@@ -80,14 +78,14 @@ struct BackgroundPicker: View {
                 }
             }
         } else {
-            ProgressView().controlSize(.small).frame(maxWidth: .infinity)
+            ProgressView().controlSize(.small).frame(maxWidth: .infinity, minHeight: 44)
                 .task { wallpapers = await Task.detached { SystemWallpaperCatalog.scan() }.value }
         }
     }
 
     private var gradientGrid: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            LazyVGrid(columns: columns, spacing: 8) {
+        VStack(alignment: .leading, spacing: EditorTheme.spacingLoose) {
+            LazyVGrid(columns: columns, spacing: EditorTheme.spacing) {
                 ForEach(BackgroundPresets.gradients) { p in
                     ThumbnailTile(source: .background(p.background), selected: background == p.background, help: p.name) {
                         pick(p.background, name: "Gradient")
@@ -98,37 +96,40 @@ struct BackgroundPicker: View {
                 EditSlider(model: model, title: "Angle", value: Binding(
                     get: { angle },
                     set: { model.setStyle(\.background, .gradient(stops: stops, angleDegrees: $0), name: "Gradient Angle") }
-                ), range: 0...360, format: { String(format: "%.0f°", $0) })
+                ), range: 0...360, format: InspectorFormat.degrees)
             }
         }
     }
 
     private var colourGrid: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            LazyVGrid(columns: columns, spacing: 8) {
+        VStack(alignment: .leading, spacing: EditorTheme.spacingLoose) {
+            LazyVGrid(columns: columns, spacing: EditorTheme.spacing) {
                 ForEach(BackgroundPresets.colors) { p in
                     ThumbnailTile(source: .background(p.background), selected: background == p.background, help: p.name) {
                         pick(p.background, name: "Background Colour")
                     }
                 }
             }
-            ColorPicker("Custom colour", selection: Binding(
+            InspectorColorRow("Custom colour", color: Binding(
                 get: {
                     if case .solid(let c) = background { return InspectorBindings.color(c) }
                     return InspectorBindings.color(model.project.style.backgroundFallbackColor)
                 },
                 set: { model.setStyle(\.background, .solid(InspectorBindings.rgba($0)), name: "Background Colour", coalescingKey: "bgcolor") }
-            ), supportsOpacity: false)
+            ))
         }
     }
 
     private var imageGrid: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            LazyVGrid(columns: columns, spacing: 8) {
+        VStack(alignment: .leading, spacing: EditorTheme.spacingLoose) {
+            LazyVGrid(columns: columns, spacing: EditorTheme.spacing) {
                 Button(action: chooseImage) {
-                    RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.15))
-                        .overlay(Image(systemName: importing ? "hourglass" : "plus").font(.title3).foregroundStyle(.secondary))
+                    RoundedRectangle(cornerRadius: EditorTheme.radiusMedium).fill(EditorTheme.surface)
+                        .overlay(RoundedRectangle(cornerRadius: EditorTheme.radiusMedium).strokeBorder(EditorTheme.stroke))
+                        .overlay(Image(systemName: importing ? "hourglass" : "plus")
+                            .font(.system(size: 14, weight: .medium)).foregroundStyle(EditorTheme.textSecondary))
                         .aspectRatio(16.0 / 10.0, contentMode: .fit)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .help("Choose an image…")
@@ -146,7 +147,8 @@ struct BackgroundPicker: View {
                         }
                 }
             }
-            if let importError { Text(importError).font(.caption).foregroundStyle(.red) }
+            if recents.isEmpty, !background.isImageBased { InspectorHint("Images you choose are remembered here for every project.") }
+            if let importError { Text(importError).editorLabel(.caption).foregroundStyle(EditorTheme.destructive) }
         }
     }
 
@@ -215,15 +217,17 @@ private struct ThumbnailTile: View {
     var body: some View {
         Button(action: action) {
             ZStack {
-                RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.15))
+                RoundedRectangle(cornerRadius: EditorTheme.radiusMedium).fill(EditorTheme.surface)
                 if let image {
                     Image(decorative: image, scale: 2).resizable().scaledToFill()
                 }
             }
             .aspectRatio(16.0 / 10.0, contentMode: .fit)
-            .clipShape(RoundedRectangle(cornerRadius: 6))
-            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.5))
-            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.accentColor, lineWidth: 2).padding(-3).opacity(selected ? 1 : 0))
+            .clipShape(RoundedRectangle(cornerRadius: EditorTheme.radiusMedium))
+            .overlay(RoundedRectangle(cornerRadius: EditorTheme.radiusMedium).strokeBorder(EditorTheme.stroke))
+            .overlay(RoundedRectangle(cornerRadius: EditorTheme.radiusMedium + 3).strokeBorder(EditorTheme.accent, lineWidth: 2)
+                .padding(-3).opacity(selected ? 1 : 0))
+            .padding(3)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
