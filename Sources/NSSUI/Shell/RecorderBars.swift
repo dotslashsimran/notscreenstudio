@@ -38,7 +38,7 @@ private struct BarChrome: ViewModifier {
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
             .background(BarBackground().clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous)))
-            .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).strokeBorder(.white.opacity(0.14), lineWidth: 1))
+            .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).strokeBorder(EditorTheme.stroke.opacity(2), lineWidth: 1))
             .environment(\.colorScheme, .dark)
             .fixedSize()
             .padding(10) // room for the panel shadow
@@ -57,7 +57,7 @@ private struct RoundIconButton: View {
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(tint)
                 .frame(width: 32, height: 32)
-                .background(Circle().fill(.white.opacity(hovering ? 0.22 : 0.10)))
+                .background(Circle().fill(hovering ? EditorTheme.surfaceHover : EditorTheme.surface.opacity(0.7)))
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
@@ -102,7 +102,7 @@ private struct DeviceToggle: View {
                     .font(.system(size: 16, weight: .medium))
                     .foregroundStyle(enabled ? Color.white : Color.white.opacity(0.55))
                     .frame(width: 34, height: 34)
-                    .background(Circle().fill(enabled ? Color.accentColor.opacity(0.85) : Color.white.opacity(0.10)))
+                    .background(Circle().fill(enabled ? EditorTheme.accent.opacity(0.85) : EditorTheme.surface.opacity(0.7)))
                     .contentShape(Circle())
             }
             .buttonStyle(.plain)
@@ -168,7 +168,7 @@ struct RecorderSetupBar: View {
             Button { Task { await model.confirmRecord() } } label: {
                 ZStack {
                     Circle().strokeBorder(.white.opacity(0.9), lineWidth: 3)
-                    Circle().fill(Color.red).padding(5)
+                    Circle().fill(EditorTheme.destructive).padding(5)
                 }
                 .frame(width: 52, height: 52)
                 .contentShape(Circle())
@@ -191,14 +191,14 @@ struct RecordingBar: View {
     var body: some View {
         HStack(spacing: 14) {
             Circle()
-                .fill(controls.isPaused ? Color.orange : Color.red)
+                .fill(controls.isPaused ? EditorTheme.trim : EditorTheme.destructive)
                 .frame(width: 10, height: 10)
                 .opacity(controls.isPaused ? 1 : (pulse ? 0.35 : 1))
                 .animation(controls.isPaused ? .default : .easeInOut(duration: 0.9).repeatForever(autoreverses: true), value: pulse)
                 .animation(.default, value: controls.isPaused)
             Text(ElapsedFormat.string(controls.elapsed))
                 .font(.system(size: 15, weight: .semibold).monospacedDigit())
-                .foregroundStyle(controls.isPaused ? Color.white.opacity(0.6) : Color.white)
+                .foregroundStyle(controls.isPaused ? EditorTheme.textSecondary : EditorTheme.textPrimary)
                 .frame(minWidth: 48, alignment: .leading)
             if controls.canPause {
                 RoundIconButton(
@@ -211,7 +211,7 @@ struct RecordingBar: View {
                     .font(.system(size: 14, weight: .bold))
                     .foregroundStyle(.white)
                     .frame(width: 36, height: 36)
-                    .background(Circle().fill(Color.red))
+                    .background(Circle().fill(EditorTheme.destructive))
                     .contentShape(Circle())
             }
             .buttonStyle(.plain)
