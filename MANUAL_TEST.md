@@ -207,3 +207,34 @@ R3D-9. Open Export… and the home screen.
 8. In the editor, check the recording length matches the timer (the paused time is not in it), the video plays with no frozen gap where you paused, and the cursor and clicks line up with the screen after the pause. With a mic on, the audio has no silent gap.
 9. Open the exported or played video and confirm neither bar, nor the countdown, nor the menu popover appears in it.
 10. The menu shows Pause or Resume and Discard while recording. Discard removes the recording and returns to idle.
+
+## Round 3: Zoom blocks on the Zoom track
+
+Use a recording with several clicks in different places (step 7). Rebuild with `./scripts/bundle.sh` first.
+
+Z1. Open a recording made before Round 3 (or a new one) in the editor.
+    - Good: the Zoom track (the row labelled "Zoom", under Video) shows one block for each auto-zoom the clicks make. Each block sits just before its click and lasts while you kept working. Auto blocks have a small sparkle in their top right corner; otherwise they look like any other zoom.
+    - Good: playing the recording zooms exactly where the blocks are, and feels the same as Round 2 (smooth spring, no jumps).
+Z2. Close the editor and open the same recording again.
+    - Good: the same blocks are there (they were saved with the project, not recomputed).
+Z3. Click a block.
+    - Good: it gets a white outline, and the Zoom section of the inspector shows its time range, Zoom level, Focus (Follow cursor or Fixed point), Ease in and Ease out.
+Z4. With the block selected, press Delete (Backspace). Then press Command Z.
+    - Good: the block disappears and the preview no longer zooms there at once (play over that spot). Undo brings it back.
+Z5. Drag a block left and right, into its neighbours and past the start and end of the timeline.
+    - Good: it follows the mouse, stops at neighbouring blocks and at the timeline ends, and never overlaps another block. One Command Z puts it back where it was.
+Z6. Drag the left and right ends of a block (the mouse turns into a resize arrow over them).
+    - Good: the block gets longer or shorter. It stops at neighbours and the timeline ends and never gets shorter than about 0.3 seconds.
+Z7. Double-click an empty part of the Zoom track.
+    - Good: a new 2× zoom block (no sparkle) appears there and is selected. Double-clicking where there is no room does nothing.
+Z8. With a block selected, drag Zoom level, then switch Focus to Fixed point. Drag Focus X and Focus Y, then click "Pick point in preview" and click somewhere in the preview.
+    - Good: the preview updates as you drag. With Fixed point the view stays on that point while the zoom is on, even when the cursor moves away. With Follow cursor the view pans to keep the cursor in frame.
+    - Good: an auto block you edit loses its sparkle (it is now yours).
+Z9. Set Ease in to 0.1 s and play into the block, then set it to 2 s and play again. Do the same with Ease out at the end of the block.
+    - Good: a short ease zooms in (or out) quickly, a long one slowly. Both stay smooth and spring-like, with no bounce past the target and no sudden stop.
+Z10. Click the trash button next to the "Zoom" track label ("Remove all auto zooms"; the same action is in the Zoom inspector section).
+    - Good: only the sparkle blocks disappear; the ones you added or edited stay. One Command Z brings them all back. The button is greyed out when there are no auto zooms.
+Z11. Add a zoom of your own over one of the clicks, then click the wand button next to the "Zoom" track label ("Regenerate auto zooms from clicks"; also in the Zoom inspector section).
+    - Good: the auto blocks come back from the clicks, your own blocks stay unchanged, and no auto block overlaps your blocks. One Command Z undoes it. On a recording with no clicks the button is greyed out.
+Z12. Export (step 23) after these edits and compare it with the preview.
+    - Good: the zooms in the MP4 are exactly the blocks on the Zoom track: deleted zooms are gone, edited ones use the new level, focus and ease.
