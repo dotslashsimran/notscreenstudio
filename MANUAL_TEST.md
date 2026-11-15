@@ -161,3 +161,16 @@ R3D-8. Drag the playhead, play, trim the start and end.
     - Good: playhead stays smooth, trim still works, playback stays at 60 fps.
 R3D-9. Open Export… and the home screen.
     - Good: both use the same dark theme, button styles and spacing as the editor.
+
+## Round 3: recording flow (recorder bar and pause)
+
+1. Click the menu bar icon, then pick a display, a window (Window… menu) or Select Area…. The menu closes and a dark floating bar appears at the bottom centre of the screen that holds the source. It shows the source name, a camera toggle with a device menu, a mic toggle with a device menu, a big round record button and a close button.
+2. Toggle the camera and mic and open each device menu. Choosing a device turns that input on. Press Esc or the close button: the bar goes away and nothing is recorded.
+3. Pick a source again and press Return or the record button. The bar hides, the 3-2-1 countdown runs, then recording starts. Cancelling the countdown (Esc or a click) brings the setup bar back.
+4. While recording, a small bar shows a pulsing red dot, the elapsed time, a pause button and a stop button. Check it stays on top of full-screen apps and follows you across Spaces. Drag it to move it.
+5. The menu bar icon turns into a red record symbol with the running time (for example 0:07).
+6. Press pause. The dot turns orange, the timer and the menu bar time stop, and the menu bar symbol changes to a pause symbol. Wait about 10 seconds, move the mouse and click, then press resume. The timer continues from where it stopped.
+7. Stop with the stop button, with Stop Recording in the menu, and (in separate runs) with Control+Command+R. The editor opens with the new recording loaded.
+8. In the editor, check the recording length matches the timer (the paused time is not in it), the video plays with no frozen gap where you paused, and the cursor and clicks line up with the screen after the pause. With a mic on, the audio has no silent gap.
+9. Open the exported or played video and confirm neither bar, nor the countdown, nor the menu popover appears in it.
+10. The menu shows Pause or Resume and Discard while recording. Discard removes the recording and returns to idle.
