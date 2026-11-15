@@ -90,13 +90,15 @@ struct EditorContent: View {
     let session: EditorSession
     var onBack: (() -> Void)?
     @State private var exportModel: ExportModel?
+    /// True while the project name field is being edited: transport and undo shortcuts then belong to the text field.
+    @FocusState private var nameFocused: Bool
 
     private var model: EditorModel { session.model }
     private var engine: PreviewEngine { session.engine }
 
     var body: some View {
         VStack(spacing: 0) {
-            EditorTopBar(model: model, onBack: onBack, export: { exportModel = ExportModel(editor: model) })
+            EditorTopBar(model: model, onBack: onBack, export: { exportModel = ExportModel(editor: model) }, nameFocused: $nameFocused)
             Divider().overlay(EditorTheme.stroke)
             HStack(spacing: 0) {
                 ZStack(alignment: .top) {
@@ -135,13 +137,13 @@ struct EditorContent: View {
     private var transport: some View {
         HStack(spacing: EditorTheme.spacingTight) {
             Button { engine.step(frames: -1) } label: { Image(systemName: "backward.frame.fill") }
-                .keyboardShortcut(.leftArrow, modifiers: []).help("Previous frame")
+                .keyboardShortcut(nameFocused ? nil : KeyboardShortcut(.leftArrow, modifiers: [])).help("Previous frame")
             Button { model.isPlaying ? engine.pause() : engine.play() } label: {
                 Image(systemName: model.isPlaying ? "pause.fill" : "play.fill")
             }
-            .keyboardShortcut(.space, modifiers: []).help("Play / pause")
+            .keyboardShortcut(nameFocused ? nil : KeyboardShortcut(.space, modifiers: [])).help("Play / pause")
             Button { engine.step(frames: 1) } label: { Image(systemName: "forward.frame.fill") }
-                .keyboardShortcut(.rightArrow, modifiers: []).help("Next frame")
+                .keyboardShortcut(nameFocused ? nil : KeyboardShortcut(.rightArrow, modifiers: [])).help("Next frame")
             TimeLabel(model: model).padding(.leading, EditorTheme.spacing)
         }
         .buttonStyle(.editorIcon)
@@ -155,7 +157,7 @@ struct EditorTopBar: View {
     var onBack: (() -> Void)?
     var export: () -> Void
     @State private var nameDraft = ""
-    @FocusState private var nameFocused: Bool
+    var nameFocused: FocusState<Bool>.Binding
 
     var body: some View {
         HStack(spacing: EditorTheme.spacingLoose) {
@@ -178,19 +180,19 @@ struct EditorTopBar: View {
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(EditorTheme.textPrimary)
                 .padding(.horizontal, 8).frame(width: 220, height: 28)
-                .background(nameFocused ? EditorTheme.surface : Color.clear, in: RoundedRectangle(cornerRadius: EditorTheme.radiusMedium))
-                .focused($nameFocused)
+                .background(nameFocused.wrappedValue ? EditorTheme.surface : Color.clear, in: RoundedRectangle(cornerRadius: EditorTheme.radiusMedium))
+                .focused(nameFocused)
                 .onSubmit { commitName() }
-                .onChange(of: nameFocused) { _, focused in if !focused { commitName() } }
+                .onChange(of: nameFocused.wrappedValue) { _, focused in if !focused { commitName() } }
                 .onAppear { nameDraft = model.project.name }
-                .onChange(of: model.project.name) { _, new in if !nameFocused { nameDraft = new } }
+                .onChange(of: model.project.name) { _, new in nameDraft = new }
                 .help("Rename this project")
             Spacer()
             HStack(spacing: 0) {
                 Button { model.undo() } label: { Image(systemName: "arrow.uturn.backward") }
-                    .disabled(!model.canUndo).keyboardShortcut("z", modifiers: .command).help("Undo")
+                    .disabled(!model.canUndo).keyboardShortcut(nameFocused.wrappedValue ? nil : KeyboardShortcut("z", modifiers: .command)).help("Undo")
                 Button { model.redo() } label: { Image(systemName: "arrow.uturn.forward") }
-                    .disabled(!model.canRedo).keyboardShortcut("z", modifiers: [.command, .shift]).help("Redo")
+                    .disabled(!model.canRedo).keyboardShortcut(nameFocused.wrappedValue ? nil : KeyboardShortcut("z", modifiers: [.command, .shift])).help("Redo")
             }
             .buttonStyle(.editorIcon)
             Picker("Aspect ratio", selection: model.styleBinding(\.aspectRatio, name: "Aspect Ratio")) {
@@ -208,7 +210,7 @@ struct EditorTopBar: View {
     }
 
     private func commitName() {
-        nameFocused = false
+        nameFocused.wrappedValue = false
         model.setProjectName(nameDraft)
         nameDraft = model.project.name
     }

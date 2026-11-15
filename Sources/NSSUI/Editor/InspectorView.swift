@@ -106,7 +106,7 @@ struct InspectorView: View {
                     Spacer()
                     Button("Choose…") { chooseImage() }.buttonStyle(.editorSecondary)
                 }
-                if let fileError { Text(fileError).editorLabel(.caption).foregroundStyle(EditorTheme.destructive) }
+                if let fileError { Text(fileError).font(.system(size: 11)).foregroundStyle(EditorTheme.destructive) }
             case .wallpaper(let name):
                 InspectorPickerRow("Wallpaper", selection: Binding(
                     get: { name },

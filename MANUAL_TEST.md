@@ -146,6 +146,7 @@ R3D-1. Open a recording in the editor.
     - Good: dark theme everywhere. Top bar with Recordings button, editable project name, undo/redo, a 16:9 / 1:1 / 9:16 picker and a blue Export button. Preview in the centre, inspector on the right, timeline across the bottom.
 R3D-2. Click the project name, type a new name and press Return. Press Cmd-Z.
     - Good: the name changes, then changes back. After going to Recordings, the home grid shows the current name. An empty name is ignored.
+    - Good: while the name field is being edited, typing a space does not play or pause, the arrow keys move the caret and do not step frames, and Cmd-Z undoes typing rather than the last edit. After Return the field loses focus, and Cmd-Z then reverts the name and the field shows the old name.
 R3D-3. Switch the aspect ratio picker between 16:9, 1:1 and 9:16.
     - Good: the preview reshapes at once. Export at each and check the file has that shape.
 R3D-4. Look at the inspector.
