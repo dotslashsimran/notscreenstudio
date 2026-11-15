@@ -58,8 +58,8 @@ public struct PauseTimeline: Sendable, Equatable {
     public func totalPaused(until t: Double) -> Double { pausedDuration(before: t) }
 
     /// A cursor track (times relative to `origin`, a host time) with the paused stretches removed, matching the video.
-    /// Samples inside a pause are dropped. Clicks and shape changes keep their order and collapse to the pause
-    /// start, so a button released during a pause is never left held down.
+    /// Samples inside a pause are dropped. Clicks made during a pause are dropped (see below); shape changes keep their order and
+    /// collapse to the pause start.
     public func removingPauses(from track: CursorTrack, origin: Double) -> CursorTrack {
         guard !intervals.isEmpty else { return track }
         func host(_ t: MediaTime) -> Double { origin + t }
@@ -70,7 +70,18 @@ public struct PauseTimeline: Sendable, Equatable {
             s.t = max(0, mapped - origin)
             return s
         }
-        out.clicks = track.clicks.map { c in
+        // A click made during a pause never happened in the recording: drop a press that starts inside a pause,
+        // and its release even if that comes after resume. A press from before the pause whose release falls
+        // inside it keeps the release, collapsed to the pause start, so the button is not left held down.
+        var droppingRelease: Set<MouseButton> = []
+        out.clicks = track.clicks.compactMap { c in
+            switch c.kind {
+            case .down:
+                if isPaused(at: host(c.t)) { droppingRelease.insert(c.button); return nil }
+                droppingRelease.remove(c.button)
+            case .up:
+                if droppingRelease.remove(c.button) != nil { return nil }
+            }
             var c = c
             c.t = max(0, shift(host(c.t)) - origin)
             return c

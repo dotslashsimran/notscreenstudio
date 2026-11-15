@@ -66,11 +66,17 @@ struct PauseTimelineTests {
         t.pause(at: 102); t.resume(at: 105) // origin 100: paused from t = 2 to t = 5
         let track = CursorTrack(
             samples: [0, 1, 2.5, 4, 5, 6].map { CursorSample(t: $0, x: $0 / 10, y: 0) },
-            clicks: [ClickEvent(t: 1, x: 0, y: 0, kind: .down), ClickEvent(t: 3, x: 0, y: 0, kind: .up), ClickEvent(t: 6, x: 0, y: 0, kind: .down)],
+            clicks: [
+                ClickEvent(t: 1, x: 0, y: 0, kind: .down), ClickEvent(t: 3, x: 0, y: 0, kind: .up), // release inside: kept, collapsed
+                ClickEvent(t: 3.2, x: 0, y: 0, kind: .down), ClickEvent(t: 3.4, x: 0, y: 0, kind: .up), // fully inside: dropped
+                ClickEvent(t: 4, x: 0, y: 0, kind: .down), ClickEvent(t: 5.5, x: 0, y: 0, kind: .up), // down inside, up after: both dropped
+                ClickEvent(t: 6, x: 0, y: 0, kind: .down), ClickEvent(t: 6.5, x: 0, y: 0, kind: .up),
+            ],
             shapes: [CursorShapeChange(t: 3, shape: .iBeam), CursorShapeChange(t: 6, shape: .arrow)])
         let out = t.removingPauses(from: track, origin: 100)
         #expect(out.samples.map(\.t) == [0, 1, 2, 3]) // 5 -> 2, 6 -> 3; 2.5 and 4 dropped
-        #expect(out.clicks.map(\.t) == [1, 2, 3]) // the release inside the pause collapses to the pause start
+        #expect(out.clicks.map(\.t) == [1, 2, 3, 3.5]) // only the click that started outside a pause survives, plus the later one
+        #expect(out.clicks.map(\.kind) == [.down, .up, .down, .up])
         #expect(out.shapes.map(\.t) == [2, 3])
     }
 
