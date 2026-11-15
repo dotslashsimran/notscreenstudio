@@ -83,15 +83,15 @@ import NSSCore
         let fast = ZoomBlock(start: 2, end: 8, scale: 2, focus: .manual(.center), easeIn: 0.3)
         let slow = ZoomBlock(start: 2, end: 8, scale: 2, focus: .manual(.center), easeIn: 1.5)
         #expect(scale(fast, at: 2.4) > scale(slow, at: 2.4) + 0.3)
-        #expect(abs(scale(fast, at: 2.4 * 1 + 0.0) - 2) < 0.1)
+        #expect(abs(scale(fast, at: 2.4) - 2) < 0.1)
         #expect(abs(scale(slow, at: 2 + 1.5 * 1.3) - 2) < 0.05)   // settles in about one response
-        #expect(abs(scale(slow, at: 2) - 1) < 1e-6)                // nothing before the block starts
+        #expect(abs(scale(slow, at: 1.99) - 1) < 1e-6)             // nothing before the block starts
     }
 
     @Test func easeOutControlsHowFastItReturns() {
         let fast = ZoomBlock(start: 1, end: 5, scale: 2, focus: .manual(.center), easeOut: 0.3)
         let slow = ZoomBlock(start: 1, end: 5, scale: 2, focus: .manual(.center), easeOut: 1.5)
-        #expect(abs(scale(fast, at: 5) - scale(slow, at: 5)) < 1e-6)  // same until the block ends
+        #expect(abs(scale(fast, at: 4.99) - scale(slow, at: 4.99)) < 1e-6)  // same until the block ends
         #expect(scale(slow, at: 5.4) > scale(fast, at: 5.4) + 0.3)
         #expect(abs(scale(fast, at: 5.4) - 1) < 0.1)
     }

@@ -31,6 +31,7 @@ import NSSExport
         #expect(!m.project.timeline.autoZoomEnabled)
         #expect(store.saves.last == m.project)
         #expect(!m.canUndo)
+        #expect(m.project != Project(name: "Z", assets: m.project.assets))
         // Opening the migrated project again changes nothing.
         let again = model(timeline: m.project.timeline, store: store)
         #expect(again.project.timeline == m.project.timeline)

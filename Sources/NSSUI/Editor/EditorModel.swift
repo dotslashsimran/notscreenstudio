@@ -85,7 +85,9 @@ public final class EditorModel {
             project.timeline = migrated
         }
         self.project = project
-        self.savedSnapshot = loaded
+        // The migration is part of loading, not a user edit: it is autosaved below, and `saveNow()` on an
+        // untouched project still writes nothing.
+        self.savedSnapshot = project
         self.reference = reference
         self.track = track
         self.dependencies = dependencies
