@@ -62,7 +62,7 @@ public struct EditorView: View {
                 ProgressView("Opening…")
             }
         }
-        .frame(minWidth: 960, minHeight: 600)
+        .frame(minWidth: 1040, minHeight: 700)
         .task(id: reference) { await load() }
         .onDisappear { session?.close() }
     }
@@ -95,25 +95,34 @@ struct EditorContent: View {
     private var engine: PreviewEngine { session.engine }
 
     var body: some View {
-        HSplitView {
-            VStack(spacing: 8) {
+        VStack(spacing: 0) {
+            EditorTopBar(model: model, onBack: onBack, export: { exportModel = ExportModel(editor: model) })
+            Divider().overlay(EditorTheme.stroke)
+            HStack(spacing: 0) {
                 ZStack(alignment: .top) {
                     PreviewView(model: model, engine: engine)
                     if model.pickingFocusFor != nil {
                         Text("Click the preview to set the zoom focus")
+                            .editorLabel(.row)
                             .padding(.horizontal, 10).padding(.vertical, 5)
                             .background(.regularMaterial, in: Capsule()).padding(8)
                     }
                 }
-                .frame(minHeight: 260)
+                .frame(minWidth: 360, minHeight: 260)
+                Divider().overlay(EditorTheme.stroke)
+                InspectorView(model: model)
+            }
+            Divider().overlay(EditorTheme.stroke)
+            VStack(spacing: EditorTheme.spacing) {
                 transport
                 EditorTimelineView(model: model, thumbnails: session.thumbnails, seek: { engine.seek(to: $0) })
-                    .padding(.horizontal, 12)
             }
-            .padding(.bottom, 8)
-            InspectorView(model: model)
+            .padding(.horizontal, EditorTheme.padding)
+            .padding(.vertical, EditorTheme.spacing)
+            .background(EditorTheme.panel)
         }
-        .toolbar { toolbar }
+        .background(EditorTheme.canvas)
+        .preferredColorScheme(.dark)
         .alert("Couldn't save", isPresented: Binding(get: { model.saveError != nil }, set: { if !$0 { model.saveError = nil } })) {
             Button("Stay") { model.saveError = nil }
             if let onBack { Button("Leave Anyway", role: .destructive) { model.saveError = nil; onBack() } }
@@ -124,23 +133,33 @@ struct EditorContent: View {
     }
 
     private var transport: some View {
-        HStack(spacing: 14) {
+        HStack(spacing: EditorTheme.spacingTight) {
             Button { engine.step(frames: -1) } label: { Image(systemName: "backward.frame.fill") }
                 .keyboardShortcut(.leftArrow, modifiers: []).help("Previous frame")
             Button { model.isPlaying ? engine.pause() : engine.play() } label: {
-                Image(systemName: model.isPlaying ? "pause.fill" : "play.fill").frame(width: 20)
+                Image(systemName: model.isPlaying ? "pause.fill" : "play.fill")
             }
             .keyboardShortcut(.space, modifiers: []).help("Play / pause")
             Button { engine.step(frames: 1) } label: { Image(systemName: "forward.frame.fill") }
                 .keyboardShortcut(.rightArrow, modifiers: []).help("Next frame")
-            TimeLabel(model: model)
+            TimeLabel(model: model).padding(.leading, EditorTheme.spacing)
         }
-        .buttonStyle(.borderless)
+        .buttonStyle(.editorIcon)
+        .frame(maxWidth: .infinity)
     }
+}
 
-    @ToolbarContentBuilder private var toolbar: some ToolbarContent {
-        if let onBack {
-            ToolbarItem(placement: .navigation) {
+/// Top bar: back to recordings, editable project name, undo/redo, aspect ratio picker and Export.
+struct EditorTopBar: View {
+    let model: EditorModel
+    var onBack: (() -> Void)?
+    var export: () -> Void
+    @State private var nameDraft = ""
+    @FocusState private var nameFocused: Bool
+
+    var body: some View {
+        HStack(spacing: EditorTheme.spacingLoose) {
+            if let onBack {
                 Button {
                     // Write pending edits now so the home screen (name, thumbnail) sees them.
                     // Unchanged projects are not rewritten; a failed write is shown and keeps the editor open.
@@ -150,16 +169,46 @@ struct EditorContent: View {
                         }
                     }
                 } label: { Label("Recordings", systemImage: "chevron.left") }
+                    .buttonStyle(.editorSecondary)
                     .help("Back to all recordings")
             }
+            TextField("Project name", text: $nameDraft)
+                .textFieldStyle(.plain)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(EditorTheme.textPrimary)
+                .padding(.horizontal, 8).frame(width: 220, height: 28)
+                .background(nameFocused ? EditorTheme.surface : Color.clear, in: RoundedRectangle(cornerRadius: EditorTheme.radiusMedium))
+                .focused($nameFocused)
+                .onSubmit { commitName() }
+                .onChange(of: nameFocused) { _, focused in if !focused { commitName() } }
+                .onAppear { nameDraft = model.project.name }
+                .onChange(of: model.project.name) { _, new in if !nameFocused { nameDraft = new } }
+                .help("Rename this project")
+            Spacer()
+            HStack(spacing: 0) {
+                Button { model.undo() } label: { Image(systemName: "arrow.uturn.backward") }
+                    .disabled(!model.canUndo).keyboardShortcut("z", modifiers: .command).help("Undo")
+                Button { model.redo() } label: { Image(systemName: "arrow.uturn.forward") }
+                    .disabled(!model.canRedo).keyboardShortcut("z", modifiers: [.command, .shift]).help("Redo")
+            }
+            .buttonStyle(.editorIcon)
+            Picker("Aspect ratio", selection: model.styleBinding(\.aspectRatio, name: "Aspect Ratio")) {
+                ForEach(AspectRatio.allCases, id: \.self) { Text(InspectorBindings.label(for: $0)).tag($0) }
+            }
+            .pickerStyle(.segmented).labelsHidden().frame(width: 150)
+            .help("Output aspect ratio")
+            Button { export() } label: { Label("Export", systemImage: "square.and.arrow.up") }
+                .buttonStyle(.editorPrimary)
+                .keyboardShortcut("e", modifiers: .command)
         }
-        ToolbarItemGroup {
-            Button { model.undo() } label: { Image(systemName: "arrow.uturn.backward") }
-                .disabled(!model.canUndo).keyboardShortcut("z", modifiers: .command).help("Undo")
-            Button { model.redo() } label: { Image(systemName: "arrow.uturn.forward") }
-                .disabled(!model.canRedo).keyboardShortcut("z", modifiers: [.command, .shift]).help("Redo")
-            Button("Export…") { exportModel = ExportModel(editor: model) }
-        }
+        .padding(.horizontal, EditorTheme.padding)
+        .frame(height: EditorTheme.topBarHeight)
+        .background(EditorTheme.panel)
+    }
+
+    private func commitName() {
+        model.setProjectName(nameDraft)
+        nameDraft = model.project.name
     }
 }
 
@@ -172,6 +221,6 @@ private struct TimeLabel: View {
     let model: EditorModel
     var body: some View {
         Text("\(TimelineGeometry.label(for: model.playhead)) / \(TimelineGeometry.label(for: model.duration))")
-            .font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary)
+            .editorLabel(.value)
     }
 }
