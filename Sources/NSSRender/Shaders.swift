@@ -8,7 +8,7 @@ enum Slot: Int, CaseIterable {
     case content2       // cornerRadius px, camera scale, camera centerX, camera centerY
     case screenSS       // duv.x, duv.y per output px, taps per axis, 0
     case shadow         // sigma px, opacity, offsetX px, offsetY px
-    case bg             // kind (0 solid, 1 gradient, 2 image, 3 wallpaper), count, 0, 0
+    case bg             // kind (0 solid, 1 linear gradient, 2 image, 3 mesh), count, 0, 0
     case bgGrad         // dir.x, dir.y, 1 / length, 0
     case bgImage        // uv scale x, uv scale y, 0, 0
     case solid          // linear rgb, alpha
@@ -27,7 +27,7 @@ enum Slot: Int, CaseIterable {
     case bubbleSS       // duv.x, duv.y per output px, 0, 0
     case borderColor    // linear rgb, alpha
     case bubbleShadow   // sigma px, opacity, offsetX px, offsetY px
-    case wallpaper      // warp, 0, 0, 0
+    case wallpaper      // mesh warp, 0, 0, 0
 
     static let maxStops = 8
     static let maxRipples = 8

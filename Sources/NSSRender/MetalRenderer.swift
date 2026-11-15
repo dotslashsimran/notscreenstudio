@@ -40,6 +40,8 @@ public final class MetalRenderer: FrameRenderer, @unchecked Sendable {
     private let lock = NSLock()
     private var baseURL: URL?
     private var imageCache: (path: String, stamp: ImageStamp, texture: MTLTexture?)?
+    /// The blurred copy of `imageCache`'s texture for one blur amount (see `ImageBlur`).
+    private var blurCache: (path: String, stamp: ImageStamp, amount: Double, texture: MTLTexture?)?
 
     /// - Parameter assetBaseURL: folder used to resolve relative `Background.image(file:)` names
     ///   (normally the `.nssproj` bundle).
@@ -87,7 +89,7 @@ public final class MetalRenderer: FrameRenderer, @unchecked Sendable {
     /// Loads and caches the background image for `style` now, so the first frame that needs it does
     /// not pay the decode cost. Optional: `render` loads lazily otherwise.
     public func preload(style: Style) {
-        lock.withLock { _ = backgroundImage(for: style.background) }
+        lock.withLock { _ = backgroundImage(for: style) }
     }
 
     // MARK: - FrameRenderer
@@ -108,7 +110,7 @@ public final class MetalRenderer: FrameRenderer, @unchecked Sendable {
             cameraTex = pair.0
             cameraRef = pair.1
         }
-        let image = backgroundImage(for: style.background)
+        let image = backgroundImage(for: style)
 
         let layout = RenderLayout(
             outputSize: PixelSize(width: outTex.width, height: outTex.height),
@@ -163,7 +165,8 @@ public final class MetalRenderer: FrameRenderer, @unchecked Sendable {
         let sh = style.shadow
         set(.shadow, max(0, sh.radius) * H / 2, max(0, min(1, sh.opacity)), sh.offsetX * H, sh.offsetY * H)
 
-        writeBackground(style.background, image: image, W: W, H: H, set: { set($0, $1, $2, $3, $4) }, setAt: { setAt($0, $1, $2, $3, $4, $5) })
+        writeBackground(BackgroundShading.make(style.background, W: W, H: H), image: image, W: W, H: H,
+                        set: { set($0, $1, $2, $3, $4) }, setAt: { setAt($0, $1, $2, $3, $4, $5) })
 
         // Cursor: the system cursor image for `shape`, hotspot on the position, squished around the hotspot.
         let cs = state.cursor
@@ -235,48 +238,40 @@ public final class MetalRenderer: FrameRenderer, @unchecked Sendable {
     }
 
     private func writeBackground(
-        _ bg: Background, image: MTLTexture?, W: Double, H: Double,
+        _ shading: BackgroundShading, image: MTLTexture?, W: Double, H: Double,
         set: (Slot, Double, Double, Double, Double) -> Void,
         setAt: (Slot, Int, Double, Double, Double, Double) -> Void
     ) {
-        func solid(_ c: RGBAColor) {
-            let lin = ColorMath.linear(c)
+        func solid(_ c: SIMD4<Double>) {
             set(.bg, 0, 0, 0, 0)
-            set(.solid, lin.x, lin.y, lin.z, max(0, min(1, c.a)))
+            set(.solid, c.x, c.y, c.z, c.w)
         }
-        switch bg {
+        switch shading {
         case .solid(let c):
             solid(c)
-        case .gradient(let rawStops, let angle):
-            let stops = Array(rawStops.sorted { $0.location < $1.location }.prefix(Slot.maxStops))
-            guard let first = stops.first else { return solid(.black) }
-            if stops.count == 1 { return solid(first.color) }
-            let a = angle * .pi / 180
-            let dx = cos(a), dy = sin(a)
-            let halfExtent = 0.5 * (W * abs(dx) + H * abs(dy))
+        case .linear(let stops, let locations, let dir, let invLength):
             set(.bg, 1, Double(stops.count), 0, 0)
-            set(.bgGrad, dx, dy, 1 / max(2 * halfExtent, 1), 0)
+            set(.bgGrad, dir.x, dir.y, invLength, 0)
             for (i, s) in stops.enumerated() {
-                let lab = ColorMath.oklab(s.color)
-                setAt(.stop0, i, lab.x, lab.y, lab.z, max(0, min(1, s.color.a)))
-                setAt(.loc0, i, s.location, 0, 0, 0)
+                setAt(.stop0, i, s.x, s.y, s.z, s.w)
+                setAt(.loc0, i, locations[i], 0, 0, 0)
+            }
+        case .mesh(let colors, let positions, let warp):
+            set(.bg, 3, Double(colors.count), 0, 0)
+            set(.wallpaper, warp, 0, 0, 0)
+            for i in colors.indices {
+                setAt(.stop0, i, colors[i].x, colors[i].y, colors[i].z, 1)
+                setAt(.loc0, i, positions[i].x, positions[i].y, 0, 0)
             }
         case .image:
-            guard let image else { return solid(RGBAColor(r: 0.5, g: 0.5, b: 0.5)) }
+            guard let image else {
+                let g = ColorMath.linear(BackgroundShading.missingImageGrey)
+                return solid(SIMD4(g.x, g.y, g.z, 1))
+            }
             let oa = W / H, ia = Double(image.width) / Double(max(image.height, 1))
             let sx = ia > oa ? oa / ia : 1, sy = ia > oa ? 1 : ia / oa
             set(.bg, 2, 0, 0, 0)
             set(.bgImage, sx, sy, 0, 0)
-        case .wallpaper(let name):
-            let preset = Wallpapers.preset(named: name)
-            let points = preset.points.prefix(Slot.maxStops)
-            set(.bg, 3, Double(points.count), 0, 0)
-            set(.wallpaper, preset.warp, 0, 0, 0)
-            for (i, p) in points.enumerated() {
-                let lab = ColorMath.oklab(p.color)
-                setAt(.stop0, i, lab.x, lab.y, lab.z, 1)
-                setAt(.loc0, i, p.x, p.y, 0, 0)
-            }
         }
     }
 
@@ -315,7 +310,10 @@ public final class MetalRenderer: FrameRenderer, @unchecked Sendable {
     /// reloads when the file's path, modification time or size changes, so this is only needed if a
     /// file is rewritten in place with identical size within the filesystem's timestamp resolution.
     public func invalidateBackgroundImage() {
-        lock.withLock { imageCache = nil }
+        lock.withLock {
+            imageCache = nil
+            blurCache = nil
+        }
     }
 
     /// Identity of the file on disk: (mtime seconds, mtime nanoseconds, size); all -1 when missing.
@@ -326,10 +324,29 @@ public final class MetalRenderer: FrameRenderer, @unchecked Sendable {
         return ImageStamp(sec: Int64(st.st_mtimespec.tv_sec), nsec: Int64(st.st_mtimespec.tv_nsec), size: Int64(st.st_size))
     }
 
-    /// Called with `lock` held. Decodes once per (path, mtime, size) and caches the result, including
-    /// a failed load; a file that appears, changes or disappears later gets a new stamp and is reloaded.
-    private func backgroundImage(for bg: Background) -> MTLTexture? {
-        guard case .image(let file) = bg else { return nil }
+    /// Called with `lock` held. The texture to draw for an image background: the decoded image, or its
+    /// blurred copy when `style.backgroundBlur` > 0. Both are cached; a slider drag re-blurs only when the
+    /// amount (rounded to 1/100) changes, and the decode itself is reused.
+    private func backgroundImage(for style: Style) -> MTLTexture? {
+        let file: String
+        switch style.background {
+        case .image(let f): file = f
+        case .systemWallpaper(let path): file = path
+        default: return nil
+        }
+        guard let (path, stamp, base) = decodedImage(file) else { return nil }
+        let amount = BackgroundBlur.quantized(style.backgroundBlur)
+        guard amount > 0, let base else { return base }
+        if let b = blurCache, b.path == path, b.stamp == stamp, b.amount == amount { return b.texture ?? base }
+        let blurred = try? ImageBlur.blur(base, amount: amount, device: device, queue: queue)
+        blurCache = (path, stamp, amount, blurred)
+        return blurred ?? base
+    }
+
+    /// Decodes once per (path, mtime, size) and caches the result, including a failed load; a file that
+    /// appears, changes or disappears later gets a new stamp and is reloaded.
+    private func decodedImage(_ file: String) -> (String, ImageStamp, MTLTexture?)? {
+        guard !file.isEmpty else { return nil }
         let url: URL
         if file.hasPrefix("/") {
             url = URL(fileURLWithPath: file)
@@ -340,10 +357,10 @@ public final class MetalRenderer: FrameRenderer, @unchecked Sendable {
         }
         let path = url.path
         let stamp = Self.fileStamp(path)
-        if let cached = imageCache, cached.path == path, cached.stamp == stamp { return cached.texture }
+        if let cached = imageCache, cached.path == path, cached.stamp == stamp { return (path, stamp, cached.texture) }
         let tex = stamp.size < 0 ? nil : loadImageTexture(url)
         imageCache = (path, stamp, tex)
-        return tex
+        return (path, stamp, tex)
     }
 
     private func loadImageTexture(_ url: URL) -> MTLTexture? {
@@ -353,7 +370,9 @@ public final class MetalRenderer: FrameRenderer, @unchecked Sendable {
             kCGImageSourceCreateThumbnailWithTransform: true,
             kCGImageSourceThumbnailMaxPixelSize: 4096,
         ]
-        guard let img = CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary) else { return nil }
+        // Dynamic (light/dark, time-of-day) HEIC wallpapers hold several images: draw the primary one.
+        let index = CGImageSourceGetPrimaryImageIndex(src)
+        guard let img = CGImageSourceCreateThumbnailAtIndex(src, index, opts as CFDictionary) else { return nil }
         let w = img.width, h = img.height
         guard w > 0, h > 0, let space = CGColorSpace(name: CGColorSpace.sRGB) else { return nil }
         let info = CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue
@@ -389,6 +408,24 @@ final class PipelineCache: @unchecked Sendable {
     static let shared = PipelineCache()
     private let lock = NSLock()
     private var pipelines: [UInt64: MTLRenderPipelineState] = [:]
+    private var blurPipelines: [UInt64: MTLComputePipelineState] = [:]
+
+    /// The background blur kernel (`ImageBlur.source`), compiled once per device.
+    func blurPipeline(for device: MTLDevice) throws -> MTLComputePipelineState {
+        try lock.withLock {
+            if let p = blurPipelines[device.registryID] { return p }
+            let library: MTLLibrary
+            do {
+                library = try device.makeLibrary(source: ImageBlur.source, options: nil)
+            } catch {
+                throw NSSError.renderFailed("blur shader compile failed: \(error)")
+            }
+            guard let fn = library.makeFunction(name: "nss_blur") else { throw NSSError.renderFailed("blur entry point missing") }
+            let p = try device.makeComputePipelineState(function: fn)
+            blurPipelines[device.registryID] = p
+            return p
+        }
+    }
 
     func pipeline(for device: MTLDevice) throws -> MTLRenderPipelineState {
         try lock.withLock {
