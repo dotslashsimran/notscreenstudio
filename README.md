@@ -2,6 +2,10 @@
 
 notscreenstudio is a free screen recorder for macOS, in the style of Screen Studio. You record from the menu bar with one click. Then you polish the video in a built-in editor: the view zooms in on your clicks, the cursor glides, and the screen sits on a nice background. The preview runs at a smooth 60 fps. You export to MP4. Everything stays on your Mac. There are no accounts, no network calls and no telemetry.
 
+[![notscreenstudio launch video](docs/launch-preview.gif)](docs/launch-preview.mp4)
+
+Click the preview to watch the launch video with sound ([docs/launch-preview.mp4](docs/launch-preview.mp4)).
+
 The app is written in Swift 6 with SwiftUI, and it draws every frame with Metal.
 
 ## Features
@@ -285,3 +289,7 @@ GitHub Actions runs on every pull request and on pushes to `main`. It runs on `m
 - The recorder can capture system audio, but the app has no switch for it yet. Recordings contain your microphone only.
 - Export is MP4 only, at 60 fps, in 1080p or 4K.
 - There is no packaged release. You build the app yourself.
+
+## Video credits
+
+The memes in the launch video are made for it, using photos from Wikimedia Commons: Ed Sheeran by Harald Krichel (CC BY-SA 3.0), Eva Rinaldi (CC BY-SA 2.0), Patrick Cristiano (CC BY-SA 4.0), Sean Reynolds (CC BY 2.0) and Drew de F Fawkes (CC BY 2.0); cats by DGtal (CC BY-SA 4.0), Keren Dvir (CC BY-SA 4.0) and Sebastian Rosa (CC0); carrots by Evan-Amos (public domain). The desktop wallpaper is Apple's Sequoia Sunrise.
