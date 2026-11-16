@@ -14,10 +14,10 @@ You do not need to build the app. Download it from [GitHub Releases](https://git
 
 1. Download `notscreenstudio-<version>-macos.zip` from the latest release and unzip it. The app runs on Apple silicon and Intel Macs (macOS 15 or later). To check the file, download the `.sha256` file too and run `shasum -a 256 -c notscreenstudio-<version>-macos.zip.sha256` in the same folder.
 2. Move `NotScreenStudio.app` to your Applications folder.
-3. Open it. The download is not notarized yet, so macOS blocks the first launch with a warning. Do one of these:
-   - Right-click the app, choose **Open**, then click **Open** again.
-   - Or open **System Settings > Privacy & Security**, scroll down and click **Open Anyway** next to the message about NotScreenStudio.
-   - Or run this in Terminal: `xattr -dr com.apple.quarantine /Applications/NotScreenStudio.app`
+3. Open it. The download is not notarized yet, so macOS 15 blocks the first launch. The right-click > Open shortcut no longer works on macOS 15. Do this instead:
+   - Try to open the app once. macOS shows a warning with only **Done** and **Move to Trash**. Click **Done**.
+   - Open **System Settings > Privacy & Security**, scroll down, and click **Open Anyway** next to the message about NotScreenStudio. Confirm with your password, then click **Open**. The button only appears after you have tried to open the app once.
+   - Or, as an alternative, run this in Terminal before you open the app: `xattr -dr com.apple.quarantine /Applications/NotScreenStudio.app`
 4. A circle icon appears in the menu bar. Click it, open **Permissions…**, and allow Screen Recording, Camera and Microphone. Then relaunch the app once. macOS only applies Screen Recording to a new process.
 
 Keep one copy of the app, in Applications. Because the download is signed ad hoc, a newer version may ask for the permissions again. See [Troubleshooting](#troubleshooting) if Screen Recording keeps asking.
