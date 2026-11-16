@@ -23,27 +23,40 @@ final class CountdownState {
     var number = 0
 }
 
-private struct CountdownView: View {
+struct CountdownView: View {
     var state: CountdownState
     var onCancel: () -> Void
 
     var body: some View {
+        CountdownFace(number: state.number)
+            .contentShape(Circle())
+            .onTapGesture(perform: onCancel)
+            .help("Click or press Esc to cancel")
+            .accessibilityLabel("Countdown \(state.number)")
+            .accessibilityHint("Click to cancel")
+            .accessibilityAddTraits(.isButton)
+    }
+}
+
+/// Large rounded digits on a blurred material circle, in the same style as the bars.
+struct CountdownFace: View {
+    var number: Int
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
         ZStack {
-            Circle().fill(.ultraThinMaterial)
-            Circle().strokeBorder(.white.opacity(0.25), lineWidth: 1.5)
-            Text("\(state.number)")
-                .font(.system(size: 120, weight: .bold, design: .rounded))
+            Text("\(number)")
+                .font(.system(size: 104, weight: .semibold, design: .rounded))
                 .monospacedDigit()
                 .foregroundStyle(.primary)
-                .id(state.number)
-                .transition(.asymmetric(
-                    insertion: .scale(scale: 1.35).combined(with: .opacity),
-                    removal: .scale(scale: 0.7).combined(with: .opacity)))
+                .id(number)
+                .transition(reduceMotion ? .opacity : .asymmetric(
+                    insertion: .scale(scale: 1.2).combined(with: .opacity),
+                    removal: .scale(scale: 0.85).combined(with: .opacity)))
         }
-        .animation(.easeOut(duration: 0.35), value: state.number)
-        .contentShape(Circle())
-        .onTapGesture(perform: onCancel)
-        .help("Click or press Esc to cancel")
+        .frame(width: 168, height: 168)
+        .circleSurface()
+        .animation(reduceMotion ? .easeOut(duration: 0.2) : .spring(duration: 0.4, bounce: 0.15), value: number)
     }
 }
 
