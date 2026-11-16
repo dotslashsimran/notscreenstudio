@@ -1,5 +1,16 @@
 import Foundation
 
+/// Keeps the newest frame that arrived during a pause. SCStream only delivers a frame when the screen changes,
+/// so if the screen changed while paused and then stays still, nothing new arrives after resume. The held frame
+/// is written at the resume time instead, which puts it at the pause start on the pause-free timeline.
+struct PausedFrameHold<Payload> {
+    private var frame: Payload?
+    mutating func hold(_ payload: Payload) { frame = payload }
+    /// Returns the held frame (once) and clears it.
+    mutating func take() -> Payload? { defer { frame = nil }; return frame }
+    var isEmpty: Bool { frame == nil }
+}
+
 /// Decides which screen frames may be written. Pure, so the ordering rules are unit-tested.
 ///
 /// Before `arm`, frames are only held (the newest one). `arm(at:)` fixes the earliest allowed time stamp

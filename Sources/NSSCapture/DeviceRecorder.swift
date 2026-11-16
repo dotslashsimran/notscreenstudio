@@ -13,6 +13,7 @@ final class DeviceRecorder: NSObject, AVCaptureAudioDataOutputSampleBufferDelega
     private let device: AVCaptureDevice
     private let url: URL
     private let origin: SharedOrigin
+    private let pause: PauseClock
     private let onFailure: @Sendable (NSSError) -> Void
     private let queue: DispatchQueue
     private let lock = NSLock()
@@ -22,7 +23,7 @@ final class DeviceRecorder: NSObject, AVCaptureAudioDataOutputSampleBufferDelega
     private var endedHost: Double?
     private var observers: [NSObjectProtocol] = []
 
-    init(kind: Kind, deviceID: String, url: URL, origin: SharedOrigin, onFailure: @escaping @Sendable (NSSError) -> Void) throws {
+    init(kind: Kind, deviceID: String, url: URL, origin: SharedOrigin, pause: PauseClock = PauseClock(), onFailure: @escaping @Sendable (NSSError) -> Void) throws {
         guard let device = CaptureDevices.device(id: deviceID) else {
             throw NSSError.io("\(kind == .microphone ? "The microphone" : "The camera") is not connected.")
         }
@@ -30,6 +31,7 @@ final class DeviceRecorder: NSObject, AVCaptureAudioDataOutputSampleBufferDelega
         self.device = device
         self.url = url
         self.origin = origin
+        self.pause = pause
         self.onFailure = onFailure
         self.queue = DispatchQueue(label: "nss.capture.\(kind)", qos: .userInteractive)
         super.init()
@@ -116,16 +118,18 @@ final class DeviceRecorder: NSObject, AVCaptureAudioDataOutputSampleBufferDelega
         await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in queue.async { c.resume() } }
         let w = lock.withLock { writer }
         guard let w else { return false }
-        return try await w.finish(endHost: ended ?? endHost)
+        return try await w.finish(endHost: pause.shift(ended ?? endHost))
     }
 
     // MARK: Sample handling
 
     private func handle(_ sample: CMSampleBuffer) {
         guard sample.isValid, let o = origin.current else { return } // before the first screen frame: drop
-        guard let sample = toHostClock(sample) else { return }
-        let start = sample.presentationTimeStamp.seconds
-        if o.isEntirelyBefore(start: start, duration: sample.duration.validOrZero.seconds) { return }
+        guard let hostSample = toHostClock(sample) else { return }
+        let start = hostSample.presentationTimeStamp.seconds
+        if o.isEntirelyBefore(start: start, duration: hostSample.duration.validOrZero.seconds) { return }
+        // Samples inside a pause are dropped; later ones move earlier by the paused time.
+        guard let sample = pause.apply(to: hostSample) else { return }
 
         let w: SampleFileWriter? = lock.withLock {
             if stopped || writerFailed || (endedHost != nil && writer == nil) { return nil }

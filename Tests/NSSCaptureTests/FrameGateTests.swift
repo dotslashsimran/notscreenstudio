@@ -60,3 +60,23 @@ import Testing
         #expect(live)
     }
 }
+
+@Suite("Paused frame hold")
+struct PausedFrameHoldTests {
+    @Test func keepsOnlyTheNewestPausedFrameAndHandsItBackOnce() {
+        var hold = PausedFrameHold<Int>()
+        #expect(hold.isEmpty)
+        #expect(hold.take() == nil)
+        hold.hold(1); hold.hold(2); hold.hold(3)
+        #expect(hold.take() == 3)
+        #expect(hold.take() == nil)
+    }
+
+    @Test func heldFrameLandsAtThePauseStartOnTheShiftedTimeline() {
+        var timeline = PauseTimeline()
+        timeline.pause(at: 10)
+        timeline.resume(at: 14)
+        // The held frame is stamped at the resume time (14), which maps to the pause start (10).
+        #expect(timeline.map(14) == 10)
+    }
+}

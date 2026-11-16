@@ -4,7 +4,8 @@ import NSSCore
 /// The real `ShellEffects`: HUD panel, camera bubble panel, global stop shortcut and area overlay.
 @MainActor
 public final class AppKitShellEffects: ShellEffects {
-    private let hud = RecordingHUDPanel()
+    private let hud = FloatingBarWindow()
+    private let setupBar = FloatingBarWindow()
     private let hotKey = GlobalHotKey()
     private let overlay = AreaSelectionOverlay()
     private let countdown = CountdownOverlay()
@@ -14,8 +15,14 @@ public final class AppKitShellEffects: ShellEffects {
 
     public var primaryScreenHeight: CGFloat { NSScreen.screens.first?.frame.height ?? 0 }
 
-    public func showHUD(startedAt: Date, onStop: @escaping @MainActor () -> Void, onDiscard: @escaping @MainActor () -> Void) {
-        hud.show(startedAt: startedAt, onStop: { onStop() }, onDiscard: { onDiscard() })
+    public func showSetupBar(model: ShellModel, sourceRect: CGRect?) {
+        setupBar.show(RecorderSetupBar(model: model), over: sourceRect, makeKey: true)
+    }
+
+    public func hideSetupBar() { setupBar.hide() }
+
+    public func showHUD(controls: RecordingControls, sourceRect: CGRect?) {
+        hud.show(RecordingBar(controls: controls), over: sourceRect, makeKey: false)
     }
 
     public func hideHUD() { hud.hide() }

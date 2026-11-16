@@ -52,6 +52,14 @@ public final class ShellModel {
     public private(set) var lastSaved: SavedRecording?
     /// True while the 3-2-1 countdown is on screen.
     public private(set) var isCountingDown = false
+    /// True while the control bar (source, camera, mic, Record) is on screen, before recording starts.
+    public private(set) var isSettingUp = false
+    /// True while a running recording is paused.
+    public private(set) var isPaused = false
+    /// Recorded seconds so far, not counting pauses. Refreshed about four times a second while recording.
+    public private(set) var elapsed: TimeInterval = 0
+    /// What the floating recording bar shows.
+    @ObservationIgnored public let controls = RecordingControls()
     /// Newest project bundle in the library (from a previous run or the last recording), so the editor can reopen it.
     public private(set) var latestProject: ProjectReference?
     /// Increments each time the editor should open. Views watch it and call `openWindow`.
@@ -67,6 +75,8 @@ public final class ShellModel {
     @ObservationIgnored private var active: ActiveRecording?
     @ObservationIgnored private var watchTask: Task<Void, Never>?
     @ObservationIgnored private var discarding = false
+    @ObservationIgnored private var clock: ElapsedClock?
+    @ObservationIgnored private var tickTask: Task<Void, Never>?
 
     struct ActiveRecording {
         var reference: ProjectReference
@@ -110,6 +120,15 @@ public final class ShellModel {
         }
     }
 
+    /// Menu bar title while recording, for example "0:07" (or "Paused 0:07"). nil when not recording.
+    public var menuBarTitle: String? {
+        guard isRecording else { return nil }
+        return ElapsedFormat.string(elapsed)
+    }
+
+    /// True when the capture layer can pause and resume cleanly.
+    public var canPause: Bool { services.session is any PausableRecordingSession }
+
     // MARK: Settings
 
     public func updateSettings(_ change: (inout ShellSettings) -> Void) {
@@ -143,6 +162,109 @@ public final class ShellModel {
     public func chooseArea() async {
         guard canStart, let area = await effects.selectArea() else { return }
         selectSource(area.source)
+        beginSetup()
+    }
+
+    // MARK: Recorder bar (before recording)
+
+    /// Shows the control bar for the current source. Record on the bar starts the countdown.
+    public func beginSetup() {
+        guard canStart else { return }
+        refreshPermissions()
+        guard permissionStates[.screenRecording] == .granted else {
+            requestOnboarding()
+            return
+        }
+        isSettingUp = true
+        effects.showSetupBar(model: self, sourceRect: setupSourceRect())
+        Task { await refreshSources() }
+    }
+
+    /// Picks a source and opens the control bar for it.
+    public func pickSource(_ source: CaptureSource?) {
+        guard canStart else { return }
+        selectSource(source)
+        beginSetup()
+    }
+
+    /// The bar's close button: nothing is recorded.
+    public func cancelSetup() {
+        guard isSettingUp else { return }
+        isSettingUp = false
+        effects.hideSetupBar()
+    }
+
+    /// The bar's Record button: hides the bar and runs the countdown, then recording. If the countdown is
+    /// cancelled the bar comes back, so the user can try again or close it.
+    public func confirmRecord() async {
+        guard isSettingUp, canStart else { return }
+        isSettingUp = false
+        effects.hideSetupBar()
+        await startRecording()
+        if case .idle = phase, !isRecording { beginSetup() }
+    }
+
+    private func setupSourceRect() -> CGRect? {
+        let (source, _) = Self.resolve(settings.source, in: listing, fallbackDisplay: CGMainDisplayID())
+        return SourceLocator.appKitRect(
+            for: source, displays: listing.displays, windows: listing.windows, primaryHeight: effects.primaryScreenHeight)
+    }
+
+    // MARK: Pause
+
+    public func pauseRecording() async {
+        guard case .recording = phase, !isPaused, let session = services.session as? any PausableRecordingSession else { return }
+        do { try await session.pause() } catch { notice = Self.describe(error); return }
+        clock?.pause(at: now())
+        setPaused(true)
+    }
+
+    public func resumeRecording() async {
+        guard case .recording = phase, isPaused, let session = services.session as? any PausableRecordingSession else { return }
+        do { try await session.resume() } catch { notice = Self.describe(error); return }
+        clock?.resume(at: now())
+        setPaused(false)
+    }
+
+    public func togglePause() async {
+        if isPaused { await resumeRecording() } else { await pauseRecording() }
+    }
+
+    private func setPaused(_ paused: Bool) {
+        isPaused = paused
+        controls.isPaused = paused
+        refreshElapsed()
+    }
+
+    private func refreshElapsed() {
+        let value = clock?.elapsed(at: now()) ?? 0
+        elapsed = value
+        controls.elapsed = value
+    }
+
+    private func startTicking(from start: Date) {
+        clock = ElapsedClock(startedAt: start)
+        isPaused = false
+        controls.isPaused = false
+        controls.canPause = canPause
+        refreshElapsed()
+        tickTask?.cancel()
+        tickTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(250))
+                self?.refreshElapsed()
+            }
+        }
+    }
+
+    private func stopTicking() {
+        tickTask?.cancel()
+        tickTask = nil
+        clock = nil
+        isPaused = false
+        controls.isPaused = false
+        elapsed = 0
+        controls.elapsed = 0
     }
 
     // MARK: Sources and permissions
@@ -199,6 +321,7 @@ public final class ShellModel {
     /// The one-click action: starts with the last-used source and devices, no dialogs.
     public func startRecording() async {
         guard canStart else { return }
+        cancelSetup()
         refreshPermissions()
         guard permissionStates[.screenRecording] == .granted else {
             requestOnboarding()
@@ -249,7 +372,8 @@ public final class ShellModel {
 
             let startedAt = now()
             apply(.started(startedAt))
-            showOverlays(startedAt: startedAt)
+            startTicking(from: startedAt)
+            showOverlays()
             watchSession()
             // The HUD now exists too: make sure the running stream excludes it (and anything else that appeared).
             if let warm = services.session as? any WarmableRecordingSession { Task { await warm.refreshExclusions() } }
@@ -373,7 +497,11 @@ public final class ShellModel {
             throw error
         }
         // From here the finished recording exists: a failed save keeps the bundle.
-        let track = await services.inputLogger.stop(recordingStartHostTime: assets.startHostTime)
+        var track = await services.inputLogger.stop(recordingStartHostTime: assets.startHostTime)
+        // Paused time is left out of the video, so it is left out of the cursor track too.
+        if let pausable = services.session as? any PausableRecordingSession {
+            track = await pausable.pauseTimeline().removingPauses(from: track, origin: assets.startHostTime)
+        }
         var style = Style()
         // The bubble was placed over the capture source; `Style.camera` is in output space (padding included).
         let geometry = bubble ?? (settings.bubbleCenter, settings.bubbleSize)
@@ -417,11 +545,11 @@ public final class ShellModel {
         return true
     }
 
-    private func showOverlays(startedAt: Date) {
-        effects.showHUD(
-            startedAt: startedAt,
-            onStop: { [weak self] in Task { await self?.stopRecording() } },
-            onDiscard: { [weak self] in Task { await self?.discardRecording() } })
+    private func showOverlays() {
+        controls.onStop = { [weak self] in Task { await self?.stopRecording() } }
+        controls.onDiscard = { [weak self] in Task { await self?.discardRecording() } }
+        controls.onTogglePause = { [weak self] in Task { await self?.togglePause() } }
+        effects.showHUD(controls: controls, sourceRect: active?.sourceRect)
         effects.registerStopShortcut { [weak self] in Task { await self?.stopRecording() } }
     }
 
@@ -436,6 +564,7 @@ public final class ShellModel {
     }
 
     private func hideOverlays() {
+        stopTicking()
         effects.hideHUD()
         effects.hideBubble()
         effects.unregisterStopShortcut()

@@ -122,7 +122,12 @@ public enum PermissionInfo {
 /// the camera bubble panel, the global shortcut and the area-selection overlay. Tests use a fake.
 @MainActor
 public protocol ShellEffects: AnyObject {
-    func showHUD(startedAt: Date, onStop: @escaping @MainActor () -> Void, onDiscard: @escaping @MainActor () -> Void)
+    /// Shows the control bar (source, camera, microphone, Record) before recording. `sourceRect` is in AppKit
+    /// coordinates and picks the screen the bar appears on.
+    func showSetupBar(model: ShellModel, sourceRect: CGRect?)
+    func hideSetupBar()
+    /// Shows the small floating bar (red dot, elapsed time, pause, stop) while recording.
+    func showHUD(controls: RecordingControls, sourceRect: CGRect?)
     func hideHUD()
     /// Show the live camera bubble over the source. `frame` is in AppKit screen coordinates.
     func showBubble(deviceID: String?, shape: CameraShape, roundness: Double, frame: CGRect, sourceRect: CGRect)

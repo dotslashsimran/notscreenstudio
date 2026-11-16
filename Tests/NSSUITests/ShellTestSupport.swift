@@ -5,8 +5,8 @@ import NSSCore
 import NSSProject
 @testable import NSSUI
 
-/// Scripted `RecordingSession`.
-final class ShellFakeSession: RecordingSession, @unchecked Sendable {
+/// Scripted `RecordingSession`. Also pausable, so pause paths can be tested.
+final class ShellFakeSession: PausableRecordingSession, @unchecked Sendable {
     private let lock = NSLock()
     private var _state: RecordingState = .idle
     private var continuation: AsyncStream<RecordingState>.Continuation?
@@ -18,6 +18,16 @@ final class ShellFakeSession: RecordingSession, @unchecked Sendable {
     var failStop: NSSError?
     var stopDuration: MediaTime = 3
     var hostTime: Double = 42
+
+    private var _timeline = PauseTimeline()
+    private var _pauseCalls = 0
+    private var _resumeCalls = 0
+    var pauseCalls: Int { lock.withLock { _pauseCalls } }
+    var resumeCalls: Int { lock.withLock { _resumeCalls } }
+    /// Host times the fake uses for pause and resume, relative to `hostTime`.
+    func pause() async throws { lock.withLock { _pauseCalls += 1; _timeline.pause(at: hostTime + 1) } }
+    func resume() async throws { lock.withLock { _resumeCalls += 1; _timeline.resume(at: hostTime + 2) } }
+    func pauseTimeline() async -> PauseTimeline { lock.withLock { _timeline } }
 
     var startedOptions: RecordingOptions? { lock.withLock { _startedOptions } }
     var startedBundle: URL? { lock.withLock { _startedBundle } }
@@ -77,11 +87,18 @@ final class ShellFakeEffects: ShellEffects {
     var shownBubbleFrame: CGRect?
     var areaResult: AreaSelection?
     var primaryScreenHeight: CGFloat = 900
-    private var stop: (@MainActor () -> Void)?
-    private var discard: (@MainActor () -> Void)?
+    var setupBarShown = false
+    var setupBarShowCount = 0
+    var setupBarSourceRect: CGRect?
+    var hudControls: RecordingControls?
+    var hudSourceRect: CGRect?
 
-    func showHUD(startedAt: Date, onStop: @escaping @MainActor () -> Void, onDiscard: @escaping @MainActor () -> Void) {
-        hudShown = true; stop = onStop; discard = onDiscard
+    func showSetupBar(model: ShellModel, sourceRect: CGRect?) {
+        setupBarShown = true; setupBarShowCount += 1; setupBarSourceRect = sourceRect
+    }
+    func hideSetupBar() { setupBarShown = false }
+    func showHUD(controls: RecordingControls, sourceRect: CGRect?) {
+        hudShown = true; hudControls = controls; hudSourceRect = sourceRect
     }
     func hideHUD() { hudShown = false }
     func showBubble(deviceID: String?, shape: CameraShape, roundness: Double, frame: CGRect, sourceRect: CGRect) {
@@ -123,7 +140,8 @@ struct ShellRig {
         windows: [WindowItem] = [WindowItem(id: 55, title: "Doc", appName: "Notes", frame: CGRect(x: 100, y: 100, width: 800, height: 600))],
         requestResults: [PermissionKind: PermissionState] = [:],
         initial: ShellSettings? = nil,
-        warm useWarm: Bool = false
+        warm useWarm: Bool = false,
+        now: @escaping @MainActor () -> Date = { Date() }
     ) {
         suite = "shell-tests-\(UUID().uuidString)"
         defaults = UserDefaults(suiteName: suite)!
@@ -142,7 +160,7 @@ struct ShellRig {
                     listing: SourceListing(displays: [Self.mainDisplay, Self.sideDisplay], windows: windows),
                     mics: mics, cams: cams),
                 permissions: StubPermissions(states: permissions, requestResults: requestResults)),
-            effects: effects, settingsStore: settingsStore)
+            effects: effects, settingsStore: settingsStore, now: now)
     }
 
     func cleanup() {
