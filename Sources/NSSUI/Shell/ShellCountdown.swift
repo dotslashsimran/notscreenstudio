@@ -23,27 +23,47 @@ final class CountdownState {
     var number = 0
 }
 
-private struct CountdownView: View {
+struct CountdownView: View {
     var state: CountdownState
     var onCancel: () -> Void
 
     var body: some View {
-        ZStack {
-            Circle().fill(.ultraThinMaterial)
-            Circle().strokeBorder(.white.opacity(0.25), lineWidth: 1.5)
-            Text("\(state.number)")
-                .font(.system(size: 120, weight: .bold, design: .rounded))
-                .monospacedDigit()
-                .foregroundStyle(.primary)
-                .id(state.number)
-                .transition(.asymmetric(
-                    insertion: .scale(scale: 1.35).combined(with: .opacity),
-                    removal: .scale(scale: 0.7).combined(with: .opacity)))
+        CountdownFace(number: state.number)
+            .contentShape(Circle())
+            .onTapGesture(perform: onCancel)
+            .help("Click or press Esc to cancel")
+            .accessibilityLabel("Countdown \(state.number)")
+            .accessibilityHint("Click to cancel")
+            .accessibilityAddTraits(.isButton)
+    }
+}
+
+/// Large rounded digits on a blurred material circle, in the same style as the bars.
+struct CountdownFace: View {
+    var number: Int
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        // Sized from the panel, so small sources still show the whole circle and digit.
+        GeometryReader { geo in
+            let side = min(geo.size.width, geo.size.height)
+            let inset = min(BarStyle.shadowInset, side * 0.1)
+            let d = max(16, min(168, side - 2 * inset))
+            ZStack {
+                Text("\(number)")
+                    .font(.system(size: d * 0.62, weight: .semibold, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(.primary)
+                    .id(number)
+                    .transition(reduceMotion ? .opacity : .asymmetric(
+                        insertion: .scale(scale: 1.2).combined(with: .opacity),
+                        removal: .scale(scale: 0.85).combined(with: .opacity)))
+            }
+            .frame(width: d, height: d)
+            .modifier(BarSurface(shape: Circle(), padded: false))
+            .position(x: geo.size.width / 2, y: geo.size.height / 2)
         }
-        .animation(.easeOut(duration: 0.35), value: state.number)
-        .contentShape(Circle())
-        .onTapGesture(perform: onCancel)
-        .help("Click or press Esc to cancel")
+        .animation(reduceMotion ? .easeOut(duration: 0.2) : .spring(duration: 0.4, bounce: 0.15), value: number)
     }
 }
 

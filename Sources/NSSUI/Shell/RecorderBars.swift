@@ -17,52 +17,26 @@ public final class RecordingControls {
     public init() {}
 }
 
-// MARK: - Shared look
+// MARK: - Shared controls
 
-/// Vibrant dark material behind both bars.
-private struct BarBackground: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSVisualEffectView {
-        let v = NSVisualEffectView()
-        v.material = .hudWindow
-        v.blendingMode = .behindWindow
-        v.state = .active
-        v.appearance = NSAppearance(named: .darkAqua)
-        return v
-    }
-    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {}
-}
-
-private struct BarChrome: ViewModifier {
-    func body(content: Content) -> some View {
-        content
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-            .background(BarBackground().clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous)))
-            .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).strokeBorder(EditorTheme.stroke.opacity(2), lineWidth: 1))
-            .environment(\.colorScheme, .dark)
-            .fixedSize()
-            .padding(10) // room for the panel shadow
-    }
-}
-
-private struct RoundIconButton: View {
+private struct IconButton: View {
     let symbol: String
+    let label: String
     let help: String
-    var tint: Color = .white
+    var glyphColor: Color = .primary
+    var fill: Color = .primary.opacity(0.08)
     let action: () -> Void
-    @State private var hovering = false
     var body: some View {
         Button(action: action) {
             Image(systemName: symbol)
                 .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(tint)
-                .frame(width: 32, height: 32)
-                .background(Circle().fill(hovering ? EditorTheme.surfaceHover : EditorTheme.surface.opacity(0.7)))
+                .foregroundStyle(glyphColor)
+                .frame(width: BarStyle.control, height: BarStyle.control)
                 .contentShape(Circle())
         }
-        .buttonStyle(.plain)
-        .onHover { hovering = $0 }
+        .buttonStyle(BarButtonStyle(fill: fill))
         .help(help)
+        .accessibilityLabel(label)
     }
 }
 
@@ -79,7 +53,13 @@ extension ShellModel {
     }
 }
 
-/// Camera or microphone: a toggle button with a device menu beside it.
+@MainActor
+private final class MenuActionTarget: NSObject {
+    var actions: [ObjectIdentifier: () -> Void] = [:]
+    @objc func fire(_ sender: NSMenuItem) { actions[ObjectIdentifier(sender)]?() }
+}
+
+/// Camera or microphone: a toggle pill with a small chevron menu for the device.
 private struct DeviceToggle: View {
     let symbolOn: String
     let symbolOff: String
@@ -95,43 +75,83 @@ private struct DeviceToggle: View {
         return devices.first { $0.id == id }?.name ?? "None found"
     }
 
+    /// Pops up the device list as a native menu. The chevron itself is plain SwiftUI so it also renders in previews.
+    private func showMenu() {
+        let menu = NSMenu()
+        if devices.isEmpty {
+            let item = NSMenuItem(title: "No \(label) found", action: nil, keyEquivalent: "")
+            item.isEnabled = false
+            menu.addItem(item)
+        }
+        let current = ShellModel.pickDevice(preferred: selection, from: devices)
+        let target = MenuActionTarget()
+        for device in devices {
+            let item = NSMenuItem(title: device.name, action: #selector(MenuActionTarget.fire(_:)), keyEquivalent: "")
+            item.target = target
+            item.state = device.id == current ? .on : .off
+            let id = device.id
+            let wasEnabled = enabled
+            let select = onSelect, toggle = onToggle
+            target.actions[ObjectIdentifier(item)] = {
+                select(id)
+                if !wasEnabled { toggle(true) }
+            }
+            menu.addItem(item)
+        }
+        // popUp runs its own loop and returns after the choice, so `target` stays alive for the action.
+        menu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
+    }
+
     var body: some View {
-        HStack(spacing: 2) {
+        HStack(spacing: 0) {
             Button { onToggle(!enabled) } label: {
                 Image(systemName: enabled ? symbolOn : symbolOff)
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundStyle(enabled ? Color.white : Color.white.opacity(0.55))
-                    .frame(width: 34, height: 34)
-                    .background(Circle().fill(enabled ? EditorTheme.accent.opacity(0.85) : EditorTheme.surface.opacity(0.7)))
-                    .contentShape(Circle())
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(enabled ? Color.white : Color.secondary)
+                    .frame(width: BarStyle.control, height: BarStyle.control)
+                    .contentShape(Capsule())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(BarButtonStyle(fill: enabled ? Color.accentColor : .primary.opacity(0.08)))
             .help(enabled ? "Turn \(label) off" : "Turn \(label) on")
+            .accessibilityLabel(label.capitalized)
+            .accessibilityValue(enabled ? "On" : "Off")
 
-            Menu {
-                if devices.isEmpty {
-                    Text("No \(label) found")
-                } else {
-                    let current = ShellModel.pickDevice(preferred: selection, from: devices)
-                    ForEach(devices) { device in
-                        Button {
-                            onSelect(device.id)
-                            if !enabled { onToggle(true) }
-                        } label: {
-                            if device.id == current { Label(device.name, systemImage: "checkmark") } else { Text(device.name) }
-                        }
-                    }
-                }
-            } label: {
+            Button(action: showMenu) {
                 Image(systemName: "chevron.down")
                     .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(.white.opacity(0.7))
-                    .frame(width: 14, height: 34)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 18, height: BarStyle.control)
+                    .contentShape(Rectangle())
             }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
+            .buttonStyle(.plain)
             .help("\(label.capitalized): \(selectedName)")
+            .accessibilityLabel("\(label.capitalized) device")
+            .accessibilityValue(selectedName)
+        }
+    }
+}
+
+/// macOS-style record button: a ring with a red disc that shrinks a little while pressed.
+private struct RecordButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        Inner(configuration: configuration)
+    }
+    private struct Inner: View {
+        let configuration: Configuration
+        @State private var hovering = false
+        @Environment(\.isFocused) private var focused
+        var body: some View {
+            let pressed = configuration.isPressed
+            ZStack {
+                Circle().strokeBorder(Color.primary.opacity(hovering ? 0.9 : 0.7), lineWidth: 2.5)
+                Circle().fill(BarStyle.recordRed.opacity(pressed ? 0.85 : 1)).padding(pressed ? 8 : 5)
+            }
+            .frame(width: BarStyle.recordButton, height: BarStyle.recordButton)
+            .contentShape(Circle())
+            .overlay(Circle().strokeBorder(Color.accentColor, lineWidth: 2).padding(-3).opacity(focused ? 1 : 0))
+            .animation(.spring(duration: 0.2, bounce: 0.2), value: pressed)
+            .animation(.easeOut(duration: 0.12), value: hovering)
+            .onHover { hovering = $0 }
         }
     }
 }
@@ -141,44 +161,72 @@ struct RecorderSetupBar: View {
     var model: ShellModel
 
     var body: some View {
-        HStack(spacing: 16) {
-            RoundIconButton(symbol: "xmark", help: "Close (Esc)") { model.cancelSetup() }
+        SetupBarContent(
+            sourceSymbol: model.sourceSymbol, sourceTitle: model.sourceTitle,
+            cameraEnabled: model.settings.cameraEnabled, cameras: model.cameras, cameraID: model.settings.cameraDeviceID,
+            micEnabled: model.settings.micEnabled, microphones: model.microphones, micID: model.settings.micDeviceID,
+            onClose: { model.cancelSetup() },
+            onCamera: { model.setCameraEnabled($0) }, onSelectCamera: { model.selectCamera($0) },
+            onMic: { model.setMicEnabled($0) }, onSelectMic: { model.selectMicrophone($0) },
+            onRecord: { Task { await model.confirmRecord() } })
+        .barAppear()
+        .task { await model.watchScreenRecordingPermission() }
+    }
+}
+
+/// Pure presentation of the setup bar, so previews can render it without a model.
+struct SetupBarContent: View {
+    var sourceSymbol: String
+    var sourceTitle: String
+    var cameraEnabled: Bool
+    var cameras: [DeviceItem]
+    var cameraID: String?
+    var micEnabled: Bool
+    var microphones: [DeviceItem]
+    var micID: String?
+    var onClose: () -> Void = {}
+    var onCamera: (Bool) -> Void = { _ in }
+    var onSelectCamera: (String?) -> Void = { _ in }
+    var onMic: (Bool) -> Void = { _ in }
+    var onSelectMic: (String?) -> Void = { _ in }
+    var onRecord: () -> Void = {}
+
+    var body: some View {
+        HStack(spacing: BarStyle.unit) {
+            IconButton(symbol: "xmark", label: "Close", help: "Close (Esc)", action: onClose)
                 .keyboardShortcut(.cancelAction)
 
-            HStack(spacing: 8) {
-                Image(systemName: model.sourceSymbol).foregroundStyle(.white.opacity(0.75))
-                Text(model.sourceTitle)
+            HStack(spacing: BarStyle.unit) {
+                Image(systemName: sourceSymbol).foregroundStyle(.secondary)
+                Text(sourceTitle)
                     .font(.system(size: 13, weight: .medium))
                     .lineLimit(1)
                     .truncationMode(.middle)
                     .frame(maxWidth: 190, alignment: .leading)
             }
-
-            Rectangle().fill(.white.opacity(0.15)).frame(width: 1, height: 28)
+            .padding(.horizontal, 12)
+            .frame(height: BarStyle.control)
+            .background(Color.primary.opacity(0.06), in: Capsule())
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Source: \(sourceTitle)")
 
             DeviceToggle(
                 symbolOn: "video.fill", symbolOff: "video.slash.fill", label: "camera",
-                enabled: model.settings.cameraEnabled, devices: model.cameras, selection: model.settings.cameraDeviceID,
-                onToggle: { model.setCameraEnabled($0) }, onSelect: { model.selectCamera($0) })
+                enabled: cameraEnabled, devices: cameras, selection: cameraID,
+                onToggle: onCamera, onSelect: onSelectCamera)
             DeviceToggle(
                 symbolOn: "mic.fill", symbolOff: "mic.slash.fill", label: "microphone",
-                enabled: model.settings.micEnabled, devices: model.microphones, selection: model.settings.micDeviceID,
-                onToggle: { model.setMicEnabled($0) }, onSelect: { model.selectMicrophone($0) })
+                enabled: micEnabled, devices: microphones, selection: micID,
+                onToggle: onMic, onSelect: onSelectMic)
 
-            Button { Task { await model.confirmRecord() } } label: {
-                ZStack {
-                    Circle().strokeBorder(.white.opacity(0.9), lineWidth: 3)
-                    Circle().fill(EditorTheme.destructive).padding(5)
-                }
-                .frame(width: 52, height: 52)
-                .contentShape(Circle())
-            }
-            .buttonStyle(.plain)
-            .keyboardShortcut(.defaultAction)
-            .help("Start recording (Return)")
+            Button(action: onRecord) { EmptyView() }
+                .buttonStyle(RecordButtonStyle())
+                .keyboardShortcut(.defaultAction)
+                .help("Start recording (Return)")
+                .accessibilityLabel("Start recording")
         }
-        .modifier(BarChrome())
-        .task { await model.watchScreenRecordingPermission() }
+        .padding(BarStyle.unit)
+        .barSurface()
     }
 }
 
@@ -187,39 +235,61 @@ struct RecorderSetupBar: View {
 /// The small bar shown while recording: red dot, elapsed time, pause or resume, stop.
 struct RecordingBar: View {
     var controls: RecordingControls
-    @State private var pulse = false
 
     var body: some View {
-        HStack(spacing: 14) {
-            Circle()
-                .fill(controls.isPaused ? EditorTheme.trim : EditorTheme.destructive)
-                .frame(width: 10, height: 10)
-                .opacity(controls.isPaused ? 1 : (pulse ? 0.35 : 1))
-                .animation(controls.isPaused ? .default : .easeInOut(duration: 0.9).repeatForever(autoreverses: true), value: pulse)
-                .animation(.default, value: controls.isPaused)
-            Text(ElapsedFormat.string(controls.elapsed))
-                .font(.system(size: 15, weight: .semibold).monospacedDigit())
-                .foregroundStyle(controls.isPaused ? EditorTheme.textSecondary : EditorTheme.textPrimary)
-                .frame(minWidth: 48, alignment: .leading)
-            if controls.canPause {
-                RoundIconButton(
-                    symbol: controls.isPaused ? "play.fill" : "pause.fill",
-                    help: controls.isPaused ? "Resume recording" : "Pause recording"
-                ) { controls.onTogglePause() }
+        RecordingBarContent(
+            elapsed: controls.elapsed, isPaused: controls.isPaused, canPause: controls.canPause,
+            onTogglePause: { controls.onTogglePause() }, onStop: { controls.onStop() })
+        .barAppear()
+    }
+}
+
+struct RecordingBarContent: View {
+    var elapsed: TimeInterval
+    var isPaused: Bool
+    var canPause: Bool
+    var onTogglePause: () -> Void = {}
+    var onStop: () -> Void = {}
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        HStack(spacing: BarStyle.unit) {
+            dot.padding(.leading, 12)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(ElapsedFormat.string(elapsed))
+                    .font(.system(size: 15, weight: .semibold).monospacedDigit())
+                    .foregroundStyle(isPaused ? Color.secondary : Color.primary)
+                if isPaused {
+                    Text("Paused").font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary)
+                }
             }
-            Button { controls.onStop() } label: {
-                Image(systemName: "stop.fill")
-                    .font(.system(size: 14, weight: .bold))
-                    .foregroundStyle(.white)
-                    .frame(width: 36, height: 36)
-                    .background(Circle().fill(EditorTheme.destructive))
-                    .contentShape(Circle())
+            .frame(minWidth: 52, alignment: .leading)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(isPaused ? "Paused at \(ElapsedFormat.string(elapsed))" : "Recording, \(ElapsedFormat.string(elapsed))")
+            if canPause {
+                IconButton(
+                    symbol: isPaused ? "play.fill" : "pause.fill",
+                    label: isPaused ? "Resume recording" : "Pause recording",
+                    help: isPaused ? "Resume recording" : "Pause recording", action: onTogglePause)
             }
-            .buttonStyle(.plain)
-            .help("Stop recording (\(StopShortcut.display))")
+            IconButton(
+                symbol: "stop.fill", label: "Stop recording", help: "Stop recording (\(StopShortcut.display))",
+                glyphColor: BarStyle.recordRed, fill: BarStyle.recordRed.opacity(0.16), action: onStop)
         }
-        .modifier(BarChrome())
-        .onAppear { pulse = true }
+        .padding(BarStyle.unit)
+        .barSurface()
+    }
+
+    @ViewBuilder private var dot: some View {
+        let base = Circle().frame(width: 10, height: 10)
+        if isPaused {
+            base.foregroundStyle(BarStyle.pausedAmber.opacity(0.55))
+        } else if reduceMotion {
+            base.foregroundStyle(BarStyle.recordRed)
+        } else {
+            base.foregroundStyle(BarStyle.recordRed)
+                .phaseAnimator([1.0, 0.4]) { v, o in v.opacity(o) } animation: { _ in .easeInOut(duration: 0.9) }
+        }
     }
 }
 
@@ -249,22 +319,22 @@ final class FloatingBarWindow {
         panel.contentView = host
         panel.isOpaque = false
         panel.backgroundColor = .clear
-        panel.hasShadow = true
+        panel.hasShadow = false // the bar draws its own layered shadow
         panel.level = .statusBar
         panel.isMovableByWindowBackground = true
         panel.hidesOnDeactivate = false
         panel.isReleasedWhenClosed = false
-        panel.appearance = NSAppearance(named: .darkAqua)
         panel.excludeFromCapture()
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
         let screens = NSScreen.screens
         if !screens.isEmpty {
             let i = BarPlacement.screenIndex(for: source, screens: screens.map(\.frame))
-            panel.setFrame(BarPlacement.frame(size: size, in: screens[i].visibleFrame), display: false)
+            var frame = BarPlacement.frame(size: size, in: screens[i].visibleFrame)
+            // The panel carries `shadowInset` of transparent padding; keep the visible bar where it sat before (10 pt).
+            frame.origin.y -= max(0, BarStyle.shadowInset - 10)
+            panel.setFrame(frame, display: false)
         }
-        panel.alphaValue = 0
         if makeKey { panel.makeKeyAndOrderFront(nil) } else { panel.orderFrontRegardless() }
-        NSAnimationContext.runAnimationGroup { $0.duration = 0.18; panel.animator().alphaValue = 1 }
         self.panel = panel
     }
 
