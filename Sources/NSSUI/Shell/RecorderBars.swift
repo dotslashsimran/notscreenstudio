@@ -329,7 +329,10 @@ final class FloatingBarWindow {
         let screens = NSScreen.screens
         if !screens.isEmpty {
             let i = BarPlacement.screenIndex(for: source, screens: screens.map(\.frame))
-            panel.setFrame(BarPlacement.frame(size: size, in: screens[i].visibleFrame), display: false)
+            var frame = BarPlacement.frame(size: size, in: screens[i].visibleFrame)
+            // The panel carries `shadowInset` of transparent padding; keep the visible bar where it sat before (10 pt).
+            frame.origin.y -= max(0, BarStyle.shadowInset - 10)
+            panel.setFrame(frame, display: false)
         }
         if makeKey { panel.makeKeyAndOrderFront(nil) } else { panel.orderFrontRegardless() }
         self.panel = panel

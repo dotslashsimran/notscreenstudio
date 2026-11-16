@@ -16,16 +16,37 @@ import Testing
     private func render<V: View>(_ name: String, _ scheme: ColorScheme, size: CGSize, @ViewBuilder _ view: () -> V) throws {
         let framed = view()
             .environment(\.colorScheme, scheme)
+            .environment(\.barUsesSystemBlur, false)
             .frame(width: size.width, height: size.height)
             .background(backdrop(scheme))
         let r = ImageRenderer(content: framed)
         r.scale = 2
         let image = r.nsImage
         #expect(image != nil)
+        if let image { try Self.check(image, name: name, size: size) }
         guard let dir = Self.outDir, let image, let tiff = image.tiffRepresentation,
               let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) else { return }
         try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         try png.write(to: URL(fileURLWithPath: dir).appendingPathComponent("\(name)-\(scheme == .dark ? "dark" : "light").png"))
+    }
+
+    /// The image has the expected pixel size, is not a flat colour, and holds no yellow placeholder pixels.
+    private static func check(_ image: NSImage, name: String, size: CGSize) throws {
+        let cg = try #require(image.cgImage(forProposedRect: nil, context: nil, hints: nil))
+        #expect(cg.width == Int(size.width * 2) && cg.height == Int(size.height * 2), "\(name) size")
+        let rep = NSBitmapImageRep(cgImage: cg)
+        var colours = Set<UInt32>()
+        var placeholder = 0
+        for y in stride(from: 0, to: rep.pixelsHigh, by: 2) {
+            for x in stride(from: 0, to: rep.pixelsWide, by: 2) {
+                guard let c = rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else { continue }
+                let r = UInt32(c.redComponent * 255), g = UInt32(c.greenComponent * 255), b = UInt32(c.blueComponent * 255)
+                colours.insert(r << 16 | g << 8 | b)
+                if r > 220 && g > 170 && b < 60 { placeholder += 1 } // the yellow "unsupported control" box
+            }
+        }
+        #expect(colours.count > 50, "\(name) looks empty")
+        #expect(placeholder == 0, "\(name) has placeholder pixels")
     }
 
     @Test func rendersEveryBarState() throws {

@@ -1,4 +1,26 @@
+import AppKit
 import SwiftUI
+
+/// Real behind-window vibrancy (`.hudWindow`) so the bars blur whatever is behind them. Follows the system appearance.
+struct BarVisualEffect: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let v = NSVisualEffectView()
+        v.material = .hudWindow
+        v.blendingMode = .behindWindow
+        v.state = .active
+        return v
+    }
+    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {}
+}
+
+private struct BarUsesSystemBlurKey: EnvironmentKey { static let defaultValue = true }
+extension EnvironmentValues {
+    /// False in `ImageRenderer` previews, which cannot draw AppKit views; they fall back to a SwiftUI material.
+    var barUsesSystemBlur: Bool {
+        get { self[BarUsesSystemBlurKey.self] }
+        set { self[BarUsesSystemBlurKey.self] = newValue }
+    }
+}
 
 /// Shared look for the floating bars and the countdown: one control size, one spacing unit, a real material,
 /// a hairline and a layered shadow. Adapts to light and dark because the bars float over any content.
@@ -26,10 +48,18 @@ struct BarSurface<S: InsettableShape>: ViewModifier {
     let shape: S
     var padded = true
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.barUsesSystemBlur) private var systemBlur
+
+    @ViewBuilder private func blur(_ content: Content) -> some View {
+        if systemBlur {
+            content.background(BarVisualEffect().clipShape(shape))
+        } else {
+            content.background(.regularMaterial, in: shape)
+        }
+    }
 
     func body(content: Content) -> some View {
-        content
-            .background(.regularMaterial, in: shape)
+        blur(content)
             .overlay(shape.strokeBorder(BarStyle.hairlineColor(scheme), lineWidth: BarStyle.hairline))
             .shadow(color: .black.opacity(scheme == .dark ? 0.35 : 0.12), radius: 1, y: 0.5)
             .shadow(color: .black.opacity(scheme == .dark ? 0.32 : 0.14), radius: 16, y: 8)
