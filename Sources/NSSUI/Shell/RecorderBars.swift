@@ -147,6 +147,7 @@ private struct RecordButtonStyle: ButtonStyle {
                 Circle().fill(BarStyle.recordRed.opacity(pressed ? 0.85 : 1)).padding(pressed ? 8 : 5)
             }
             .frame(width: BarStyle.recordButton, height: BarStyle.recordButton)
+            .contentShape(Circle())
             .overlay(Circle().strokeBorder(Color.accentColor, lineWidth: 2).padding(-3).opacity(focused ? 1 : 0))
             .animation(.spring(duration: 0.2, bounce: 0.2), value: pressed)
             .animation(.easeOut(duration: 0.12), value: hovering)

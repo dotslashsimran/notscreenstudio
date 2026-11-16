@@ -24,6 +24,7 @@ enum BarStyle {
 /// Capsule on a vibrancy material with an inner hairline and a soft two-layer shadow.
 struct BarSurface<S: InsettableShape>: ViewModifier {
     let shape: S
+    var padded = true
     @Environment(\.colorScheme) private var scheme
 
     func body(content: Content) -> some View {
@@ -32,8 +33,8 @@ struct BarSurface<S: InsettableShape>: ViewModifier {
             .overlay(shape.strokeBorder(BarStyle.hairlineColor(scheme), lineWidth: BarStyle.hairline))
             .shadow(color: .black.opacity(scheme == .dark ? 0.35 : 0.12), radius: 1, y: 0.5)
             .shadow(color: .black.opacity(scheme == .dark ? 0.32 : 0.14), radius: 16, y: 8)
-            .padding(BarStyle.shadowInset)
-            .fixedSize()
+            .padding(padded ? BarStyle.shadowInset : 0)
+            .fixedSize(horizontal: padded, vertical: padded)
     }
 }
 

@@ -46,6 +46,13 @@ import Testing
         }
     }
 
+    @Test func countdownRendersAtSmallPanelSizes() throws {
+        for side in [40.0, 100.0, 216.0] {
+            let r = ImageRenderer(content: CountdownFace(number: 2).frame(width: side, height: side))
+            #expect(r.nsImage != nil)
+        }
+    }
+
     @Test func tokensAreOnTheEightPointGrid() {
         #expect(BarStyle.unit == 8)
         #expect(BarStyle.control.truncatingRemainder(dividingBy: 4) == 0)

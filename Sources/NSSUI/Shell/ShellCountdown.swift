@@ -44,18 +44,25 @@ struct CountdownFace: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        ZStack {
-            Text("\(number)")
-                .font(.system(size: 104, weight: .semibold, design: .rounded))
-                .monospacedDigit()
-                .foregroundStyle(.primary)
-                .id(number)
-                .transition(reduceMotion ? .opacity : .asymmetric(
-                    insertion: .scale(scale: 1.2).combined(with: .opacity),
-                    removal: .scale(scale: 0.85).combined(with: .opacity)))
+        // Sized from the panel, so small sources still show the whole circle and digit.
+        GeometryReader { geo in
+            let side = min(geo.size.width, geo.size.height)
+            let inset = min(BarStyle.shadowInset, side * 0.1)
+            let d = max(16, min(168, side - 2 * inset))
+            ZStack {
+                Text("\(number)")
+                    .font(.system(size: d * 0.62, weight: .semibold, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(.primary)
+                    .id(number)
+                    .transition(reduceMotion ? .opacity : .asymmetric(
+                        insertion: .scale(scale: 1.2).combined(with: .opacity),
+                        removal: .scale(scale: 0.85).combined(with: .opacity)))
+            }
+            .frame(width: d, height: d)
+            .modifier(BarSurface(shape: Circle(), padded: false))
+            .position(x: geo.size.width / 2, y: geo.size.height / 2)
         }
-        .frame(width: 168, height: 168)
-        .circleSurface()
         .animation(reduceMotion ? .easeOut(duration: 0.2) : .spring(duration: 0.4, bounce: 0.15), value: number)
     }
 }
