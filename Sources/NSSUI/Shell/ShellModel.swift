@@ -1,3 +1,4 @@
+import AppKit
 import CoreGraphics
 import Foundation
 import NSSCapture
@@ -77,6 +78,7 @@ public final class ShellModel {
     @ObservationIgnored private var discarding = false
     @ObservationIgnored private var clock: ElapsedClock?
     @ObservationIgnored private var tickTask: Task<Void, Never>?
+    @ObservationIgnored private var activationObserver: NSObjectProtocol?
 
     struct ActiveRecording {
         var reference: ProjectReference
@@ -172,7 +174,11 @@ public final class ShellModel {
         guard canStart else { return }
         refreshPermissions()
         guard permissionStates[.screenRecording] == .granted else {
-            requestOnboarding()
+            // The sync value is only a hint: confirm with ScreenCaptureKit before sending the user to onboarding.
+            Task {
+                await refreshPermissionsAuthoritative()
+                if permissionStates[.screenRecording] == .granted { beginSetup() } else { requestOnboarding() }
+            }
             return
         }
         isSettingUp = true
@@ -273,11 +279,45 @@ public final class ShellModel {
         for kind in PermissionKind.allCases { permissionStates[kind] = services.permissions.status(of: kind) }
     }
 
+    /// Re-checks every permission, using the authoritative ScreenCaptureKit probe for screen recording.
+    public func refreshPermissionsAuthoritative() async {
+        refreshPermissions()
+        let state = await services.permissions.probe(.screenRecording)
+        permissionStates[.screenRecording] = state
+    }
+
     public func requestPermission(_ kind: PermissionKind) async {
         permissionStates[kind] = await services.permissions.request(kind)
-        refreshPermissions()
+        await refreshPermissionsAuthoritative()
         if kind == .screenRecording { await refreshSources() }
     }
+
+    /// Polls every 2 seconds while screen recording is not granted. Returns when granted or cancelled.
+    /// Views run it from `.task`, so it stops when they disappear.
+    public func watchScreenRecordingPermission() async {
+        while !Task.isCancelled {
+            await refreshPermissionsAuthoritative()
+            if permissionStates[.screenRecording] == .granted { return }
+            try? await Task.sleep(for: .seconds(2))
+        }
+    }
+
+    /// Re-checks whenever the app becomes active (for example after the user returns from System Settings).
+    func observeActivation() {
+        guard activationObserver == nil else { return }
+        activationObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                await self.refreshPermissionsAuthoritative()
+                if self.permissionStates[.screenRecording] == .granted, self.sourceError != nil { await self.refreshSources() }
+            }
+        }
+    }
+
+    /// Relaunches the same bundle: macOS applies a new Screen Recording grant only to a new process.
+    public func relaunchApp() { AppRelauncher.relaunch() }
 
     public func openSystemSettings(for kind: PermissionKind) { services.permissions.openSettings(for: kind) }
 
@@ -295,6 +335,7 @@ public final class ShellModel {
 
     /// Call once at launch: reads permissions and asks to show onboarding if screen recording is missing.
     public func launch() async {
+        observeActivation()
         latestProject = await newestLoadableProject()
         await refreshSources()
         if !missingRequiredPermissions.isEmpty { requestOnboarding() }
@@ -322,7 +363,7 @@ public final class ShellModel {
     public func startRecording() async {
         guard canStart else { return }
         cancelSetup()
-        refreshPermissions()
+        await refreshPermissionsAuthoritative()
         guard permissionStates[.screenRecording] == .granted else {
             requestOnboarding()
             return

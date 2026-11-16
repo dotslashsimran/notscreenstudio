@@ -1,0 +1,40 @@
+import Foundation
+import Testing
+@preconcurrency import ScreenCaptureKit
+@testable import NSSCapture
+
+@Suite struct ScreenRecordingAccessTests {
+    @Test func preflightFalseButShareableOkIsGranted() async {
+        let a = await ScreenRecordingAccess.evaluate(preflight: { false }, shareable: { .ok })
+        #expect(a.isGranted)
+        #expect(a.message == nil)
+    }
+
+    @Test func bothFailingIsNotGranted() async {
+        let a = await ScreenRecordingAccess.evaluate(
+            preflight: { false }, shareable: { .failed(domain: SCStreamErrorDomain, code: SCStreamError.Code.userDeclined.rawValue) })
+        #expect(!a.isGranted)
+        #expect(a.message?.contains("System Settings") == true)
+    }
+
+    @Test func preflightTrueButShareableFailedIsNotGranted() {
+        let a = ScreenRecordingAccess(preflight: true, shareable: .failed(domain: "X", code: 1))
+        #expect(!a.isGranted)
+    }
+
+    @Test func withoutProbeThePreflightHintDecides() {
+        #expect(ScreenRecordingAccess(preflight: true, shareable: nil).isGranted)
+        #expect(!ScreenRecordingAccess(preflight: false, shareable: nil).isGranted)
+    }
+
+    @Test func errorCodesMapToClearMessages() {
+        let declined = ScreenRecordingAccess.message(domain: SCStreamErrorDomain, code: SCStreamError.Code.userDeclined.rawValue)
+        #expect(declined.contains("Screen & System Audio Recording"))
+        let conn = ScreenRecordingAccess.message(domain: SCStreamErrorDomain, code: SCStreamError.Code.failedApplicationConnectionInvalid.rawValue)
+        #expect(conn.contains("Relaunch"))
+        let ents = ScreenRecordingAccess.message(domain: SCStreamErrorDomain, code: SCStreamError.Code.missingEntitlements.rawValue)
+        #expect(ents.contains("entitlements"))
+        let other = ScreenRecordingAccess.message(domain: "Foo", code: 42)
+        #expect(other.contains("Foo") && other.contains("42"))
+    }
+}

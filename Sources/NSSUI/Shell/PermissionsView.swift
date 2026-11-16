@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// First-run onboarding and the fix-it screen: explains each permission, asks for it, or opens the right System Settings pane.
@@ -15,17 +16,20 @@ public struct PermissionsView: View {
             ForEach(PermissionKind.allCases) { kind in
                 PermissionRow(kind: kind, state: model.permissionStates[kind] ?? .notDetermined,
                               request: { Task { await model.requestPermission(kind) } },
-                              openSettings: { model.openSystemSettings(for: kind) })
+                              openSettings: { model.openSystemSettings(for: kind) },
+                              relaunch: AppRelauncher.canRelaunch ? { model.relaunchApp() } : nil)
             }
             HStack {
                 Spacer()
-                Button("Check Again") { model.refreshPermissions() }
+                Button("Check Again") { Task { await model.refreshPermissionsAuthoritative() } }
             }
         }
         .padding(24)
         .frame(width: 480)
-        .excludedFromCapture()
-        .task { model.refreshPermissions() }
+        .task { await model.watchScreenRecordingPermission() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            Task { await model.refreshPermissionsAuthoritative() }
+        }
     }
 }
 
@@ -34,6 +38,7 @@ private struct PermissionRow: View {
     let state: PermissionState
     let request: () -> Void
     let openSettings: () -> Void
+    var relaunch: (() -> Void)?
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -45,6 +50,11 @@ private struct PermissionRow: View {
                 if state == .denied {
                     Text("Turn it on in System Settings > Privacy & Security > \(PermissionInfo.title(kind)).")
                         .font(.caption).foregroundStyle(.orange)
+                }
+                if kind == .screenRecording, state != .granted, let relaunch {
+                    Text("Already turned on? macOS applies the change only to a new launch.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Button("Relaunch notscreenstudio", action: relaunch)
                 }
             }
             Spacer()

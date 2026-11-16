@@ -18,8 +18,11 @@ public enum CapturePermissions {
         }
     }
 
-    // Screen recording. `CGPreflightScreenCaptureAccess` never prompts.
-    public static var screenRecordingGranted: Bool { CGPreflightScreenCaptureAccess() }
+    // Screen recording. Never prompts. This is only a fast hint: `CGPreflightScreenCaptureAccess`, or the last
+    // successful `checkScreenRecording()`. Use `checkScreenRecording()` (SCShareableContent) for a real answer.
+    public static var screenRecordingGranted: Bool {
+        CGPreflightScreenCaptureAccess() || ScreenRecordingCache.lastGranted == true
+    }
 
     /// Shows the system prompt the first time. The grant usually takes effect after an app restart.
     @discardableResult
@@ -34,8 +37,9 @@ public enum CapturePermissions {
     /// Ensures everything `options` needs is allowed, prompting for mic/camera if undecided.
     /// Throws `NSSError.permissionDenied` naming the first missing permission.
     static func ensure(for options: RecordingOptions) async throws {
-        guard screenRecordingGranted else {
-            throw NSSError.permissionDenied("Screen recording permission is required. Enable it in System Settings > Privacy & Security > Screen & System Audio Recording.")
+        let access = await checkScreenRecording()
+        guard access.isGranted else {
+            throw NSSError.permissionDenied(access.message ?? ScreenRecordingAccess.settingsHint)
         }
         if options.micDeviceID != nil {
             let ok = microphoneStatus() == .granted ? true : (microphoneStatus() == .notDetermined ? await requestMicrophone() : false)

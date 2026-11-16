@@ -80,6 +80,12 @@ public protocol PermissionsProviding: Sendable {
     func request(_ kind: PermissionKind) async -> PermissionState
     /// Opens the System Settings pane where the user can fix a denied permission.
     func openSettings(for kind: PermissionKind)
+    /// The authoritative check (for screen recording: ScreenCaptureKit). Never prompts.
+    func probe(_ kind: PermissionKind) async -> PermissionState
+}
+
+extension PermissionsProviding {
+    public func probe(_ kind: PermissionKind) async -> PermissionState { status(of: kind) }
 }
 
 /// Pure helpers for permissions UI and the settings deep links.
@@ -196,11 +202,22 @@ public struct SystemPermissions: PermissionsProviding {
         }
     }
 
+    public func probe(_ kind: PermissionKind) async -> PermissionState {
+        guard kind == .screenRecording else { return status(of: kind) }
+        let access = await CapturePermissions.checkScreenRecording()
+        if access.isGranted { return .granted }
+        return UserDefaults.standard.bool(forKey: Self.askedKey) ? .denied : .notDetermined
+    }
+
     public func request(_ kind: PermissionKind) async -> PermissionState {
         switch kind {
         case .screenRecording:
-            UserDefaults.standard.set(true, forKey: Self.askedKey)
-            _ = CapturePermissions.requestScreenRecording()
+            // Ask once only. Repeated calls just reopen the system dialog and never help.
+            if !UserDefaults.standard.bool(forKey: Self.askedKey) {
+                UserDefaults.standard.set(true, forKey: Self.askedKey)
+                _ = CapturePermissions.requestScreenRecording()
+            }
+            return await probe(.screenRecording)
         case .camera: _ = await CapturePermissions.requestCamera()
         case .microphone: _ = await CapturePermissions.requestMicrophone()
         }
