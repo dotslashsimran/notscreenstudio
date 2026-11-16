@@ -80,6 +80,14 @@ public struct ScreenRecordingAccess: Sendable, Equatable {
     }
 }
 
+extension ScreenRecordingAccess {
+    /// The answer when the gate refuses a probe. A real granted verdict is never downgraded by a false preflight
+    /// (preflight can stay false in a process that can in fact capture); with no verdict yet the hint decides.
+    static func refused(preflight: Bool, lastGranted: Bool?) -> ScreenRecordingAccess {
+        ScreenRecordingAccess(preflight: preflight, shareable: lastGranted == true ? .ok : nil)
+    }
+}
+
 /// Last verdict of the authoritative check, shared so synchronous callers can use it as a hint.
 enum ScreenRecordingCache {
     private static let state = OSAllocatedUnfairLock<Bool?>(initialState: nil)
@@ -88,15 +96,22 @@ enum ScreenRecordingCache {
 }
 
 extension CapturePermissions {
-    /// The authoritative check: asks ScreenCaptureKit for shareable content. It never calls
-    /// `CGRequestScreenCaptureAccess`, and it skips ScreenCaptureKit (which could show the system prompt) until the
-    /// user has asked for the permission once or the preflight hint is already true.
-    public static func checkScreenRecording() async -> ScreenRecordingAccess {
+    /// The authoritative check: asks ScreenCaptureKit for shareable content, which can show the system prompt for
+    /// an app that is not approved. `ScreenRecordingGate` decides whether it may run: only when the preflight is
+    /// true or the user clicked Allow / Check Again, and `.automatic` checks at most once per app activation.
+    /// Otherwise the answer is the preflight hint alone. It never calls `CGRequestScreenCaptureAccess`.
+    public static func checkScreenRecording(_ trigger: ScreenRecordingGate.Trigger = .automatic) async -> ScreenRecordingAccess {
+        let gate = ScreenRecordingGate.system
+        guard gate.authorizeProbe(trigger) else {
+            // Not allowed to probe: keep the last real verdict, and leave the cache alone.
+            return ScreenRecordingAccess.refused(preflight: CGPreflightScreenCaptureAccess(), lastGranted: ScreenRecordingCache.lastGranted)
+        }
         let access = await ScreenRecordingAccess.evaluate(
-            asked: screenRecordingAsked,
+            asked: true,
             preflight: { CGPreflightScreenCaptureAccess() },
             shareable: { await probeShareableContent() })
         ScreenRecordingCache.store(access.isGranted)
+        gate.recordProbeResult(granted: access.shareable == .ok)
         if PermissionDiagnostics.isEnabled { PermissionDiagnostics.log(access) }
         return access
     }

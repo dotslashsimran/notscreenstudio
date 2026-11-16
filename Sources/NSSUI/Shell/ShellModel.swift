@@ -297,29 +297,48 @@ public final class ShellModel {
     }
 
     /// Re-checks every permission, using the authoritative ScreenCaptureKit probe for screen recording.
-    public func refreshPermissionsAuthoritative() async {
+    /// `userInitiated` is true only for a click on Allow or Check Again. Automatic callers may get the quick hint.
+    public func refreshPermissionsAuthoritative(userInitiated: Bool = false) async {
         refreshPermissions()
-        let state = await services.permissions.probe(.screenRecording)
+        let state = await services.permissions.probe(.screenRecording, userInitiated: userInitiated)
         screenRecordingProbed = true
         permissionStates[.screenRecording] = state
     }
 
+    /// The Check Again button.
+    public func checkAgain() async { await refreshPermissionsAuthoritative(userInitiated: true) }
+
+    /// One explicit click on Allow. Shows the system prompt at most once; it does not probe ScreenCaptureKit
+    /// for screen recording (that could raise a second prompt), only reads the quick state.
     public func requestPermission(_ kind: PermissionKind) async {
         let requested = await services.permissions.request(kind)
-        if kind != .screenRecording { permissionStates[kind] = requested }
-        await refreshPermissionsAuthoritative()
-        if kind == .screenRecording { await refreshSources() }
+        if kind == .screenRecording {
+            if requested == .granted {
+                permissionStates[.screenRecording] = .granted
+                await refreshSources()
+            } else if permissionStates[.screenRecording] != .granted {
+                permissionStates[.screenRecording] = requested
+            }
+        } else {
+            permissionStates[kind] = requested
+        }
     }
 
     /// Polls every 2 seconds while screen recording is not granted. Returns when granted or cancelled.
-    /// Views run it from `.task`, so it stops when they disappear.
+    /// Views run it from `.task`, so it stops when they disappear. It reads only the quick state
+    /// (`CGPreflightScreenCaptureAccess`, which never prompts) and runs the rate-limited probe once it turns true.
     public func watchScreenRecordingPermission() async {
         while !Task.isCancelled {
-            await refreshPermissionsAuthoritative()
-            if permissionStates[.screenRecording] == .granted { return }
-            try? await Task.sleep(for: .seconds(2))
+            if services.permissions.status(of: .screenRecording) == .granted {
+                await refreshPermissionsAuthoritative()
+                if permissionStates[.screenRecording] == .granted { return }
+            }
+            await pollSleep(.seconds(2))
         }
     }
+
+    /// The wait between polls. Tests replace it so no wall clock is involved.
+    @ObservationIgnored var pollSleep: @Sendable (Duration) async -> Void = { try? await Task.sleep(for: $0) }
 
     /// Re-checks whenever the app becomes active (for example after the user returns from System Settings).
     func observeActivation() {
@@ -329,10 +348,16 @@ public final class ShellModel {
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                await self.refreshPermissionsAuthoritative()
-                if self.permissionStates[.screenRecording] == .granted, self.sourceError != nil { await self.refreshSources() }
+                await self.handleActivation()
             }
         }
+    }
+
+    /// One automatic, rate-limited probe per activation.
+    func handleActivation() async {
+        services.permissions.noteActivation()
+        await refreshPermissionsAuthoritative()
+        if permissionStates[.screenRecording] == .granted, sourceError != nil { await refreshSources() }
     }
 
     /// Relaunches the same bundle: macOS applies a new Screen Recording grant only to a new process.

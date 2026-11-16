@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import os
 import Testing
 import NSSCore
 @testable import NSSUI
@@ -415,5 +416,48 @@ import NSSCore
         #expect(rig.effects.setupBarShowCount == 2)
         #expect(rig.effects.setupBarSourceRect != nil)
         #expect(rig.effects.setupBarSourceRect != first)
+    }
+}
+
+@MainActor @Suite struct ScreenRecordingPromptTests {
+    /// Poll with a fake clock: sleeping only counts, and the third sleep cancels the watcher.
+    @Test func pollingNeverProbes() async {
+        let rig = ShellRig(permissions: [.screenRecording: .denied, .camera: .granted, .microphone: .granted])
+        defer { rig.cleanup() }
+        let sleeps = OSAllocatedUnfairLock(initialState: 0)
+        let task = Task { @MainActor in
+            rig.model.pollSleep = { _ in sleeps.withLock { $0 += 1 }; await Task.yield() }
+            await rig.model.watchScreenRecordingPermission()
+        }
+        while sleeps.withLock({ $0 }) < 50 { await Task.yield() }
+        task.cancel()
+        await task.value
+        #expect(rig.probeCounter.count == 0)
+    }
+
+    @Test func pollProbesOnceWhenPreflightTurnsTrue() async {
+        let rig = ShellRig(permissions: [.screenRecording: .granted, .camera: .granted, .microphone: .granted])
+        defer { rig.cleanup() }
+        await rig.model.watchScreenRecordingPermission()
+        #expect(rig.probeCounter.count == 1)
+        #expect(rig.probeCounter.userCount == 0)
+    }
+
+    @Test func allowClickDoesNotProbeAndCheckAgainDoes() async {
+        let rig = ShellRig(permissions: [.screenRecording: .denied, .camera: .granted, .microphone: .granted])
+        defer { rig.cleanup() }
+        await rig.model.requestPermission(.screenRecording)
+        #expect(rig.probeCounter.count == 0)
+        await rig.model.checkAgain()
+        #expect(rig.probeCounter.count == 1)
+        #expect(rig.probeCounter.userCount == 1)
+    }
+
+    @Test func activationProbesAutomaticallyNotAsUser() async {
+        let rig = ShellRig()
+        defer { rig.cleanup() }
+        await rig.model.handleActivation()
+        #expect(rig.probeCounter.count == 1)
+        #expect(rig.probeCounter.userCount == 0)
     }
 }

@@ -24,19 +24,20 @@ public enum CapturePermissions {
         CGPreflightScreenCaptureAccess() || ScreenRecordingCache.lastGranted == true
     }
 
-    /// Shows the system prompt the first time. The grant usually takes effect after an app restart.
+    /// The explicit Allow action: shows the system prompt, at most once for this signing identity. Call it only
+    /// from a user click. The grant usually takes effect after an app restart.
     @discardableResult
     public static func requestScreenRecording() -> Bool {
-        screenRecordingAsked = true
-        return CGRequestScreenCaptureAccess()
+        ScreenRecordingGate.system.requestFromUserAction()
+        return CGPreflightScreenCaptureAccess()
     }
 
-    static let askedKey = "notscreenstudio.shell.askedScreenRecording"
-    /// True once the app has asked for Screen Recording. The system gives no "not asked yet" answer, so we remember it.
-    public static var screenRecordingAsked: Bool {
-        get { UserDefaults.standard.bool(forKey: askedKey) }
-        set { UserDefaults.standard.set(newValue, forKey: askedKey) }
-    }
+    /// True once this signing identity has asked for Screen Recording. The system gives no "not asked yet" answer,
+    /// so we remember it, tied to the app's signature so a rebuild starts fresh.
+    public static var screenRecordingAsked: Bool { ScreenRecordingGate.system.asked }
+
+    /// Call when the app becomes active, to allow one more automatic check.
+    public static func noteAppActivation() { ScreenRecordingGate.system.noteActivation() }
 
     public static func microphoneStatus() -> Status { mapAuthorization(AVCaptureDevice.authorizationStatus(for: .audio)) }
     public static func cameraStatus() -> Status { mapAuthorization(AVCaptureDevice.authorizationStatus(for: .video)) }
@@ -47,7 +48,7 @@ public enum CapturePermissions {
     /// Ensures everything `options` needs is allowed, prompting for mic/camera if undecided.
     /// Throws `NSSError.permissionDenied` naming the first missing permission.
     static func ensure(for options: RecordingOptions) async throws {
-        let access = await checkScreenRecording()
+        let access = await checkScreenRecording(.user)
         guard access.isGranted else {
             throw NSSError.permissionDenied(access.message ?? ScreenRecordingAccess.settingsHint)
         }

@@ -52,4 +52,12 @@ import Testing
         let hinted = await ScreenRecordingAccess.evaluate(asked: false, preflight: { true }, shareable: { .ok })
         #expect(hinted.shareable == .ok)
     }
+
+    @Test func refusedProbeKeepsALastGrantedVerdict() {
+        // Preflight stays false in a process that can capture; a rate-limited re-probe must not downgrade.
+        #expect(ScreenRecordingAccess.refused(preflight: false, lastGranted: true).isGranted)
+        #expect(!ScreenRecordingAccess.refused(preflight: false, lastGranted: false).isGranted)
+        #expect(!ScreenRecordingAccess.refused(preflight: false, lastGranted: nil).isGranted)
+        #expect(ScreenRecordingAccess.refused(preflight: true, lastGranted: nil).isGranted)
+    }
 }
