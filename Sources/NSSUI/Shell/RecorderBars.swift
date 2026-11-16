@@ -53,6 +53,12 @@ extension ShellModel {
     }
 }
 
+@MainActor
+private final class MenuActionTarget: NSObject {
+    var actions: [ObjectIdentifier: () -> Void] = [:]
+    @objc func fire(_ sender: NSMenuItem) { actions[ObjectIdentifier(sender)]?() }
+}
+
 /// Camera or microphone: a toggle pill with a small chevron menu for the device.
 private struct DeviceToggle: View {
     let symbolOn: String
@@ -69,6 +75,33 @@ private struct DeviceToggle: View {
         return devices.first { $0.id == id }?.name ?? "None found"
     }
 
+    /// Pops up the device list as a native menu. The chevron itself is plain SwiftUI so it also renders in previews.
+    private func showMenu() {
+        let menu = NSMenu()
+        if devices.isEmpty {
+            let item = NSMenuItem(title: "No \(label) found", action: nil, keyEquivalent: "")
+            item.isEnabled = false
+            menu.addItem(item)
+        }
+        let current = ShellModel.pickDevice(preferred: selection, from: devices)
+        let target = MenuActionTarget()
+        for device in devices {
+            let item = NSMenuItem(title: device.name, action: #selector(MenuActionTarget.fire(_:)), keyEquivalent: "")
+            item.target = target
+            item.state = device.id == current ? .on : .off
+            let id = device.id
+            let wasEnabled = enabled
+            let select = onSelect, toggle = onToggle
+            target.actions[ObjectIdentifier(item)] = {
+                select(id)
+                if !wasEnabled { toggle(true) }
+            }
+            menu.addItem(item)
+        }
+        // popUp runs its own loop and returns after the choice, so `target` stays alive for the action.
+        menu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
+    }
+
     var body: some View {
         HStack(spacing: 0) {
             Button { onToggle(!enabled) } label: {
@@ -83,30 +116,14 @@ private struct DeviceToggle: View {
             .accessibilityLabel(label.capitalized)
             .accessibilityValue(enabled ? "On" : "Off")
 
-            Menu {
-                if devices.isEmpty {
-                    Text("No \(label) found")
-                } else {
-                    let current = ShellModel.pickDevice(preferred: selection, from: devices)
-                    ForEach(devices) { device in
-                        Button {
-                            onSelect(device.id)
-                            if !enabled { onToggle(true) }
-                        } label: {
-                            if device.id == current { Label(device.name, systemImage: "checkmark") } else { Text(device.name) }
-                        }
-                    }
-                }
-            } label: {
+            Button(action: showMenu) {
                 Image(systemName: "chevron.down")
                     .font(.system(size: 9, weight: .bold))
                     .foregroundStyle(.secondary)
                     .frame(width: 18, height: BarStyle.control)
                     .contentShape(Rectangle())
             }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
+            .buttonStyle(.plain)
             .help("\(label.capitalized): \(selectedName)")
             .accessibilityLabel("\(label.capitalized) device")
             .accessibilityValue(selectedName)
