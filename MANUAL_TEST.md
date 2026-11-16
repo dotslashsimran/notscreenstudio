@@ -29,6 +29,10 @@ Recordings are saved in `~/Movies/notscreenstudio/` as `.nssproj` folders. Expor
 5c. Screenshot scope: with the Permissions window open (not recording), take a screenshot (Shift-Command-4, then Space, click the window).
    - Good: the window appears in the screenshot. While the setup bar, countdown or recording bar is on screen, those bars must not appear in the recording.
 
+5d. Single prompt: reset Screen Recording for the app (`tccutil reset ScreenCapture <bundle id>`), launch it, and leave the Permissions window open for at least 30 seconds without clicking.
+   - Good: no system dialog appears while you wait. Click Allow once: the dialog "would like to record this computer's screen and audio" appears exactly once. Switch away and back to the app a few times, and click Check Again: no second dialog appears until you have turned it on in System Settings and relaunched. Relaunch after granting: no dialog at launch.
+   - Also check after a rebuild signed differently (for example ad hoc after a dev-cert build): the app behaves as never asked, shows Allow, and prompts only after you click it.
+
 Note: by default `bundle.sh` signs ad hoc, so macOS may treat each rebuild as a new app. To keep permissions across rebuilds, run `./scripts/make-dev-cert.sh` once (it creates the `notscreenstudio-dev` identity in your login keychain; `bundle.sh` then uses it, or set `NSS_SIGN_IDENTITY`). Allow the permissions once for the first build signed that way, rebuild, and check that Screen Recording is still allowed.
 
 ## 3. Record

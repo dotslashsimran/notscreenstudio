@@ -11,6 +11,7 @@ private final class FakeWorld: @unchecked Sendable {
     var identity: String? { get { lock.withLock { $0.identity } } set { lock.withLock { $0.identity = newValue } } }
     var stored: String? { lock.withLock { $0.stored } }
     var requests: Int { lock.withLock { $0.requests } }
+    func setStored(_ v: String?) { lock.withLock { $0.stored = v } }
     func gate() -> ScreenRecordingGate {
         ScreenRecordingGate(
             preflight: { self.preflight }, identity: { self.identity },
@@ -22,7 +23,7 @@ private final class FakeWorld: @unchecked Sendable {
 @Suite struct ScreenRecordingGateTests {
     @Test func persistedFlagAloneNeverAllowsAProbe() {
         let w = FakeWorld()
-        w.lock.withLock { $0.stored = "id-A" } // asked before, same identity
+        w.setStored("id-A") // asked before, same identity
         let g = w.gate()
         #expect(g.asked)
         #expect(!g.authorizeProbe(.automatic))
