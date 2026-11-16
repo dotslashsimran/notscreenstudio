@@ -40,8 +40,12 @@ PLIST
 # (create it once with scripts/make-dev-cert.sh), else ad hoc. A stable identity keeps Screen Recording,
 # Camera and Microphone permission across rebuilds. This script never creates keychain items.
 SIGN_ID="${NSS_SIGN_IDENTITY:-}"
-if [ -z "$SIGN_ID" ] && security find-identity -p codesigning 2>/dev/null | grep -q '"notscreenstudio-dev"'; then
-  SIGN_ID="notscreenstudio-dev"
+if [ -z "$SIGN_ID" ]; then
+  # Capture first: `grep -q` closing the pipe early would trip pipefail. -v lists only identities codesign accepts.
+  IDENTITIES="$(security find-identity -v -p codesigning 2>/dev/null || true)"
+  case "$IDENTITIES" in
+    *'"notscreenstudio-dev"'*) SIGN_ID="notscreenstudio-dev" ;;
+  esac
 fi
 if [ -n "$SIGN_ID" ]; then
   echo "Signing with identity: $SIGN_ID"

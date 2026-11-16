@@ -20,6 +20,8 @@ Recordings are saved in `~/Movies/notscreenstudio/` as `.nssproj` folders. Expor
 5. Quit the app (menu bar icon, then Quit) and open it again once. Screen Recording only takes effect after a restart.
    - Good: the source list in the menu now shows your displays and windows, with no permission warning.
 
+4a. First launch on a clean state: run `tccutil reset ScreenCapture dev.notscreenstudio.app` and `defaults delete dev.notscreenstudio.app`, then open the app.
+   - Good: no system Screen Recording dialog appears at launch. The Permissions window explains it and shows Allow. The dialog appears only after you click Allow, and only once. (Result on this Mac: record here after running it.)
 5a. If Screen Recording is still not granted, the Screen Recording row shows a **Relaunch notscreenstudio** button. Turn the app on in System Settings, come back, and watch the row.
    - Good: the row turns to Allowed within a few seconds without clicking, or after you click Relaunch and the app comes back.
 5b. Start the app from Terminal with `NSS_PERMISSION_DEBUG=1`.

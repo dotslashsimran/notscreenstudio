@@ -64,11 +64,17 @@ public struct ScreenRecordingAccess: Sendable, Equatable {
     }
 
     /// The decision, with both checks injected so it needs no hardware or permission.
+    ///
+    /// `SCShareableContent` is TCC-gated and can itself show the system prompt for an app with no decision
+    /// yet, so it only runs when the preflight is already true or the user has asked for the permission once
+    /// (`asked`). Otherwise the result is the preflight hint alone.
     public static func evaluate(
+        asked: Bool,
         preflight: @Sendable () -> Bool,
         shareable: @Sendable () async -> ShareableOutcome
     ) async -> ScreenRecordingAccess {
         let hint = preflight()
+        guard hint || asked else { return ScreenRecordingAccess(preflight: hint, shareable: nil) }
         let outcome = await shareable()
         return ScreenRecordingAccess(preflight: hint, shareable: outcome)
     }
@@ -82,9 +88,12 @@ enum ScreenRecordingCache {
 }
 
 extension CapturePermissions {
-    /// The authoritative check: asks ScreenCaptureKit for shareable content. Never prompts.
+    /// The authoritative check: asks ScreenCaptureKit for shareable content. It never calls
+    /// `CGRequestScreenCaptureAccess`, and it skips ScreenCaptureKit (which could show the system prompt) until the
+    /// user has asked for the permission once or the preflight hint is already true.
     public static func checkScreenRecording() async -> ScreenRecordingAccess {
         let access = await ScreenRecordingAccess.evaluate(
+            asked: screenRecordingAsked,
             preflight: { CGPreflightScreenCaptureAccess() },
             shareable: { await probeShareableContent() })
         ScreenRecordingCache.store(access.isGranted)

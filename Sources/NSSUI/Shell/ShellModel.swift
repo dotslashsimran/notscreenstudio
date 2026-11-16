@@ -78,6 +78,9 @@ public final class ShellModel {
     @ObservationIgnored private var discarding = false
     @ObservationIgnored private var clock: ElapsedClock?
     @ObservationIgnored private var tickTask: Task<Void, Never>?
+    /// The in-flight permission probe started by `beginSetup`. Internal so tests can await it.
+    @ObservationIgnored var setupProbeTask: Task<Void, Never>?
+    @ObservationIgnored private var screenRecordingProbed = false
     @ObservationIgnored private var activationObserver: NSObjectProtocol?
 
     struct ActiveRecording {
@@ -171,16 +174,24 @@ public final class ShellModel {
 
     /// Shows the control bar for the current source. Record on the bar starts the countdown.
     public func beginSetup() {
-        guard canStart else { return }
+        guard canStart, !isSettingUp, setupProbeTask == nil else { return }
         refreshPermissions()
-        guard permissionStates[.screenRecording] == .granted else {
-            // The sync value is only a hint: confirm with ScreenCaptureKit before sending the user to onboarding.
-            Task {
-                await refreshPermissionsAuthoritative()
-                if permissionStates[.screenRecording] == .granted { beginSetup() } else { requestOnboarding() }
-            }
+        if permissionStates[.screenRecording] == .granted {
+            presentSetupBar()
             return
         }
+        // The sync value is only a hint: confirm with ScreenCaptureKit before sending the user to onboarding.
+        // One probe at a time, so quick double clicks cannot open two bars.
+        setupProbeTask = Task { [weak self] in
+            guard let self else { return }
+            await self.refreshPermissionsAuthoritative()
+            self.setupProbeTask = nil
+            guard self.canStart, !self.isSettingUp else { return }
+            if self.permissionStates[.screenRecording] == .granted { self.presentSetupBar() } else { self.requestOnboarding() }
+        }
+    }
+
+    private func presentSetupBar() {
         isSettingUp = true
         effects.showSetupBar(model: self, sourceRect: setupSourceRect())
         Task { await refreshSources() }
@@ -275,19 +286,26 @@ public final class ShellModel {
 
     // MARK: Sources and permissions
 
+    /// Reads the quick (synchronous) state. For screen recording the hint is used only until the first
+    /// authoritative probe; after that the probe result stays the source of truth and is never overwritten here.
     public func refreshPermissions() {
-        for kind in PermissionKind.allCases { permissionStates[kind] = services.permissions.status(of: kind) }
+        for kind in PermissionKind.allCases where kind != .screenRecording {
+            permissionStates[kind] = services.permissions.status(of: kind)
+        }
+        if !screenRecordingProbed { permissionStates[.screenRecording] = services.permissions.status(of: .screenRecording) }
     }
 
     /// Re-checks every permission, using the authoritative ScreenCaptureKit probe for screen recording.
     public func refreshPermissionsAuthoritative() async {
         refreshPermissions()
         let state = await services.permissions.probe(.screenRecording)
+        screenRecordingProbed = true
         permissionStates[.screenRecording] = state
     }
 
     public func requestPermission(_ kind: PermissionKind) async {
-        permissionStates[kind] = await services.permissions.request(kind)
+        let requested = await services.permissions.request(kind)
+        if kind != .screenRecording { permissionStates[kind] = requested }
         await refreshPermissionsAuthoritative()
         if kind == .screenRecording { await refreshSources() }
     }

@@ -196,7 +196,7 @@ public struct SystemPermissions: PermissionsProviding {
         case .screenRecording:
             if CapturePermissions.screenRecordingGranted { return .granted }
             // The system gives no "not asked yet" answer for screen recording, so remember our own request.
-            return UserDefaults.standard.bool(forKey: Self.askedKey) ? .denied : .notDetermined
+            return CapturePermissions.screenRecordingAsked ? .denied : .notDetermined
         case .camera: return Self.map(CapturePermissions.cameraStatus())
         case .microphone: return Self.map(CapturePermissions.microphoneStatus())
         }
@@ -206,16 +206,15 @@ public struct SystemPermissions: PermissionsProviding {
         guard kind == .screenRecording else { return status(of: kind) }
         let access = await CapturePermissions.checkScreenRecording()
         if access.isGranted { return .granted }
-        return UserDefaults.standard.bool(forKey: Self.askedKey) ? .denied : .notDetermined
+        return CapturePermissions.screenRecordingAsked ? .denied : .notDetermined
     }
 
     public func request(_ kind: PermissionKind) async -> PermissionState {
         switch kind {
         case .screenRecording:
             // Ask once only. Repeated calls just reopen the system dialog and never help.
-            if !UserDefaults.standard.bool(forKey: Self.askedKey) {
-                UserDefaults.standard.set(true, forKey: Self.askedKey)
-                _ = CapturePermissions.requestScreenRecording()
+            if !CapturePermissions.screenRecordingAsked {
+                _ = CapturePermissions.requestScreenRecording() // records that we asked
             }
             return await probe(.screenRecording)
         case .camera: _ = await CapturePermissions.requestCamera()
@@ -230,8 +229,6 @@ public struct SystemPermissions: PermissionsProviding {
         let url = PermissionInfo.settingsURL(kind)
         Task { @MainActor in Self.open(url) }
     }
-
-    private static let askedKey = "notscreenstudio.shell.askedScreenRecording"
 
     private static func map(_ s: CapturePermissions.Status) -> PermissionState {
         switch s {
@@ -271,13 +268,19 @@ public struct StubPermissions: PermissionsProviding {
     public var states: [PermissionKind: PermissionState]
     /// What `request` answers for a kind. Kinds not listed answer with their current state.
     public var requestResults: [PermissionKind: PermissionState]
+    /// What `probe` answers for a kind. Kinds not listed answer with their current state, so a test can make the
+    /// authoritative answer differ from the quick `status` hint.
+    public var probeResults: [PermissionKind: PermissionState]
     public init(
         states: [PermissionKind: PermissionState] = [.screenRecording: .granted, .camera: .granted, .microphone: .granted],
-        requestResults: [PermissionKind: PermissionState] = [:]
+        requestResults: [PermissionKind: PermissionState] = [:],
+        probeResults: [PermissionKind: PermissionState] = [:]
     ) {
         self.states = states
         self.requestResults = requestResults
+        self.probeResults = probeResults
     }
+    public func probe(_ kind: PermissionKind) async -> PermissionState { probeResults[kind] ?? status(of: kind) }
     public func status(of kind: PermissionKind) -> PermissionState { states[kind] ?? .notDetermined }
     public func request(_ kind: PermissionKind) async -> PermissionState { requestResults[kind] ?? status(of: kind) }
     public func openSettings(for kind: PermissionKind) {}

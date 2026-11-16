@@ -26,7 +26,17 @@ public enum CapturePermissions {
 
     /// Shows the system prompt the first time. The grant usually takes effect after an app restart.
     @discardableResult
-    public static func requestScreenRecording() -> Bool { CGRequestScreenCaptureAccess() }
+    public static func requestScreenRecording() -> Bool {
+        screenRecordingAsked = true
+        return CGRequestScreenCaptureAccess()
+    }
+
+    static let askedKey = "notscreenstudio.shell.askedScreenRecording"
+    /// True once the app has asked for Screen Recording. The system gives no "not asked yet" answer, so we remember it.
+    public static var screenRecordingAsked: Bool {
+        get { UserDefaults.standard.bool(forKey: askedKey) }
+        set { UserDefaults.standard.set(newValue, forKey: askedKey) }
+    }
 
     public static func microphoneStatus() -> Status { mapAuthorization(AVCaptureDevice.authorizationStatus(for: .audio)) }
     public static func cameraStatus() -> Status { mapAuthorization(AVCaptureDevice.authorizationStatus(for: .video)) }

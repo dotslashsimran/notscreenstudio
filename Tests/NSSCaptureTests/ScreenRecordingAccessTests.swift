@@ -1,18 +1,19 @@
 import Foundation
+import os
 import Testing
 @preconcurrency import ScreenCaptureKit
 @testable import NSSCapture
 
 @Suite struct ScreenRecordingAccessTests {
     @Test func preflightFalseButShareableOkIsGranted() async {
-        let a = await ScreenRecordingAccess.evaluate(preflight: { false }, shareable: { .ok })
+        let a = await ScreenRecordingAccess.evaluate(asked: true, preflight: { false }, shareable: { .ok })
         #expect(a.isGranted)
         #expect(a.message == nil)
     }
 
     @Test func bothFailingIsNotGranted() async {
         let a = await ScreenRecordingAccess.evaluate(
-            preflight: { false }, shareable: { .failed(domain: SCStreamErrorDomain, code: SCStreamError.Code.userDeclined.rawValue) })
+            asked: true, preflight: { false }, shareable: { .failed(domain: SCStreamErrorDomain, code: SCStreamError.Code.userDeclined.rawValue) })
         #expect(!a.isGranted)
         #expect(a.message?.contains("System Settings") == true)
     }
@@ -36,5 +37,19 @@ import Testing
         #expect(ents.contains("entitlements"))
         let other = ScreenRecordingAccess.message(domain: "Foo", code: 42)
         #expect(other.contains("Foo") && other.contains("42"))
+    }
+
+    @Test func probeIsSkippedBeforeAskingWhenPreflightIsFalse() async {
+        let ran = OSAllocatedUnfairLock(initialState: false)
+        let a = await ScreenRecordingAccess.evaluate(asked: false, preflight: { false }, shareable: { ran.withLock { $0 = true }; return .ok })
+        #expect(!ran.withLock { $0 })
+        #expect(a.shareable == nil && !a.isGranted)
+    }
+
+    @Test func probeRunsWhenAskedOrPreflightTrue() async {
+        let asked = await ScreenRecordingAccess.evaluate(asked: true, preflight: { false }, shareable: { .ok })
+        #expect(asked.isGranted)
+        let hinted = await ScreenRecordingAccess.evaluate(asked: false, preflight: { true }, shareable: { .ok })
+        #expect(hinted.shareable == .ok)
     }
 }

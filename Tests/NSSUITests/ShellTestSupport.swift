@@ -139,6 +139,7 @@ struct ShellRig {
         cams: [DeviceItem] = [DeviceItem(id: "cam1", name: "Cam", isDefault: true)],
         windows: [WindowItem] = [WindowItem(id: 55, title: "Doc", appName: "Notes", frame: CGRect(x: 100, y: 100, width: 800, height: 600))],
         requestResults: [PermissionKind: PermissionState] = [:],
+        probeResults: [PermissionKind: PermissionState] = [:],
         initial: ShellSettings? = nil,
         warm useWarm: Bool = false,
         now: @escaping @MainActor () -> Date = { Date() }
@@ -159,7 +160,7 @@ struct ShellRig {
                 sources: StubSourceProvider(
                     listing: SourceListing(displays: [Self.mainDisplay, Self.sideDisplay], windows: windows),
                     mics: mics, cams: cams),
-                permissions: StubPermissions(states: permissions, requestResults: requestResults)),
+                permissions: StubPermissions(states: permissions, requestResults: requestResults, probeResults: probeResults)),
             effects: effects, settingsStore: settingsStore, now: now)
     }
 

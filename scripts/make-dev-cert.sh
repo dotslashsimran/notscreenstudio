@@ -38,7 +38,9 @@ openssl pkcs12 -export -legacy -inkey "$TMP/key.pem" -in "$TMP/cert.pem" -out "$
   || openssl pkcs12 -export -inkey "$TMP/key.pem" -in "$TMP/cert.pem" -out "$TMP/id.p12" -passout "pass:$PASS"
 
 security import "$TMP/id.p12" -k "$KEYCHAIN" -P "$PASS" -T /usr/bin/codesign
+# Trust the certificate for code signing only, so `security find-identity -v -p codesigning` lists it.
+# macOS shows a password prompt for this.
+security add-trusted-cert -r trustRoot -p codeSign -k "$KEYCHAIN" "$TMP/cert.pem"
 echo
-echo "Done. Check with:  security find-identity -p codesigning"
-echo "(The identity may be listed as CSSMERR_TP_NOT_TRUSTED. That is fine: codesign can still sign with it.)"
+echo "Done. Check with:  security find-identity -v -p codesigning"
 echo "Now rebuild with ./scripts/bundle.sh. Allow Screen Recording once for the new build; later rebuilds keep it."

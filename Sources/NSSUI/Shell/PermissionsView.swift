@@ -27,9 +27,6 @@ public struct PermissionsView: View {
         .padding(24)
         .frame(width: 480)
         .task { await model.watchScreenRecordingPermission() }
-        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-            Task { await model.refreshPermissionsAuthoritative() }
-        }
     }
 }
 
