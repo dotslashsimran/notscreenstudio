@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# OPT-IN. Creates a self-signed code-signing identity named "notscreenstudio-dev" in your login keychain, so
+# scripts/bundle.sh can sign every build with the same identity and macOS keeps Screen Recording, Camera and
+# Microphone permission across rebuilds. Run it yourself, once. Nothing else in this repo runs it.
+set -euo pipefail
+
+NAME="notscreenstudio-dev"
+KEYCHAIN="$HOME/Library/Keychains/login.keychain-db"
+
+if security find-identity -p codesigning 2>/dev/null | grep -q "\"$NAME\""; then
+  echo "Identity \"$NAME\" already exists. Nothing to do."
+  exit 0
+fi
+
+echo "This will add a self-signed code-signing certificate \"$NAME\" to your login keychain."
+echo "macOS may ask for your login password to allow the import."
+
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
+PASS="nss-$(openssl rand -hex 8)"
+
+cat > "$TMP/cert.cnf" <<CNF
+[req]
+distinguished_name = dn
+x509_extensions = ext
+prompt = no
+[dn]
+CN = $NAME
+[ext]
+basicConstraints = critical,CA:false
+keyUsage = critical,digitalSignature
+extendedKeyUsage = critical,codeSigning
+CNF
+
+openssl req -x509 -newkey rsa:2048 -nodes -days 3650 -keyout "$TMP/key.pem" -out "$TMP/cert.pem" -config "$TMP/cert.cnf" 2>/dev/null
+# -legacy keeps the PKCS#12 readable by `security import` when OpenSSL 3 is installed.
+openssl pkcs12 -export -legacy -inkey "$TMP/key.pem" -in "$TMP/cert.pem" -out "$TMP/id.p12" -passout "pass:$PASS" 2>/dev/null \
+  || openssl pkcs12 -export -inkey "$TMP/key.pem" -in "$TMP/cert.pem" -out "$TMP/id.p12" -passout "pass:$PASS"
+
+security import "$TMP/id.p12" -k "$KEYCHAIN" -P "$PASS" -T /usr/bin/codesign
+echo
+echo "Done. Check with:  security find-identity -p codesigning"
+echo "(The identity may be listed as CSSMERR_TP_NOT_TRUSTED. That is fine: codesign can still sign with it.)"
+echo "Now rebuild with ./scripts/bundle.sh. Allow Screen Recording once for the new build; later rebuilds keep it."
