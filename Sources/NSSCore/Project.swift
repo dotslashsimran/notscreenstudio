@@ -2,7 +2,9 @@ import Foundation
 
 /// A `.nssproj` bundle's `project.json`.
 public struct Project: Codable, Sendable, Equatable, Identifiable {
-    public static let currentSchemaVersion = 1
+    /// v2 (Round 3): `.mesh` and `.systemWallpaper` backgrounds and `Style.backgroundBlur`;
+    /// v1 `.wallpaper(name:)` backgrounds migrate to `.mesh` (see `ProjectMigrator`).
+    public static let currentSchemaVersion = 2
 
     public var id: UUID
     public var name: String

@@ -227,7 +227,7 @@ public final class PreviewEngine {
         poolIndex = (poolIndex + 1) % pool.count
         let frameTime = t
         let job = Unchecked(value: (screenFrame, camera?.lastFrame))
-        let style = model.project.style
+        let style = model.project.style.resolvingAssets(relativeTo: model.reference.url)
         let renderer = renderer
         let box = motion
         renderQueue.async { [weak self] in

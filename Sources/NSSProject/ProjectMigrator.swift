@@ -24,8 +24,24 @@ public struct ProjectMigrator: Sendable {
     public let currentVersion: Int
     private let steps: [Int: Step]
 
-    /// There are no steps yet: v1 is the first schema. Add `1: { json in ... }` here when v2 ships.
-    public static let standard = ProjectMigrator(currentVersion: Project.currentSchemaVersion, steps: [:])
+    /// v1 -> v2: a `.wallpaper(name:)` background becomes the `.mesh` with the same colour points.
+    /// Add the next step as `2: { json in ... }`.
+    public static let standard = ProjectMigrator(currentVersion: Project.currentSchemaVersion, steps: [
+        1: migrateV1Wallpaper,
+    ])
+
+    /// Rewrites `style.background` = `{"wallpaper": {"name": n}}` to the equivalent `{"mesh": ...}`.
+    /// Anything else is left alone (decoding fills defaults for the new v2 fields).
+    @Sendable static func migrateV1Wallpaper(_ json: inout [String: Any]) throws {
+        guard var style = json["style"] as? [String: Any],
+            let background = style["background"] as? [String: Any],
+            let wallpaper = background["wallpaper"] as? [String: Any]
+        else { return }
+        let name = wallpaper["name"] as? String ?? ""
+        let data = try JSONEncoder().encode(BackgroundPresets.migratedWallpaper(named: name))
+        style["background"] = try JSONSerialization.jsonObject(with: data)
+        json["style"] = style
+    }
 
     public init(currentVersion: Int, steps: [Int: Step]) {
         self.currentVersion = currentVersion

@@ -92,6 +92,8 @@ public struct MP4Exporter: Exporter {
         let totalFrames = max(1, Int((length * Double(fps)).rounded()))
 
         let size = preset.outputSize(for: project.style.aspectRatio)
+        // Same asset resolution as the preview, so bundle-relative background images draw in both.
+        let renderStyle = project.style.resolvingAssets(relativeTo: projectURL)
         let factory = motionFactoryForAspect?(assets.sourcePixelSize.aspect) ?? motionFactory
         let motion = factory(track, project.timeline, project.style.cursor, duration)
         let frames = try await frameSourceFactory(screenURL, cameraURL)
@@ -157,7 +159,7 @@ public struct MP4Exporter: Exporter {
             var out: CVPixelBuffer?
             let status = CVPixelBufferPoolCreatePixelBuffer(nil, pool, &out)
             guard status == kCVReturnSuccess, let out else { throw NSSError.renderFailed("Pixel buffer pool failed: \(status)") }
-            try renderer.render(screen: screen, camera: camera, state: state, style: project.style, into: out)
+            try renderer.render(screen: screen, camera: camera, state: state, style: renderStyle, into: out)
             guard adaptor.append(out, withPresentationTime: CMTime(value: CMTimeValue(i), timescale: fps)) else {
                 throw Self.writerError(writer, "Video write failed")
             }

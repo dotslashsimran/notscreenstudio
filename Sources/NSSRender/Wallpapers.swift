@@ -1,64 +1,11 @@
 import Foundation
 import NSSCore
 
-/// Built-in procedural wallpapers for `Background.wallpaper(name:)`. Each one is a handful of colour
-/// control points blended smoothly in OKLab by the shader (no image assets, no asset catalog).
+/// Legacy (schema v1) procedural wallpapers for `Background.wallpaper(name:)`. The colour points live in
+/// `BackgroundPresets.legacyWallpaper(named:)` (NSSCore) and are drawn by the same shader path as `.mesh`.
 public enum Wallpapers {
-    struct Preset: Sendable {
-        var points: [(x: Double, y: Double, color: RGBAColor)]
-        var warp: Double
-    }
-
     /// Names accepted by `Background.wallpaper(name:)`. Unknown names fall back to the first one.
-    public static let names: [String] = ["aurora", "sunset", "ocean", "forest", "midnight", "peach"]
-
-    static func preset(named name: String) -> Preset {
-        switch name.lowercased() {
-        case "sunset":
-            return Preset(points: [
-                (0.1, 0.1, RGBAColor(r: 0.98, g: 0.45, b: 0.35)),
-                (0.9, 0.2, RGBAColor(r: 0.99, g: 0.75, b: 0.40)),
-                (0.2, 0.9, RGBAColor(r: 0.60, g: 0.20, b: 0.55)),
-                (0.85, 0.85, RGBAColor(r: 0.95, g: 0.35, b: 0.50)),
-            ], warp: 0.05)
-        case "ocean":
-            return Preset(points: [
-                (0.0, 0.0, RGBAColor(r: 0.05, g: 0.25, b: 0.55)),
-                (1.0, 0.1, RGBAColor(r: 0.10, g: 0.60, b: 0.80)),
-                (0.3, 1.0, RGBAColor(r: 0.15, g: 0.75, b: 0.70)),
-                (0.9, 0.9, RGBAColor(r: 0.05, g: 0.35, b: 0.65)),
-            ], warp: 0.04)
-        case "forest":
-            return Preset(points: [
-                (0.1, 0.2, RGBAColor(r: 0.10, g: 0.35, b: 0.25)),
-                (0.8, 0.1, RGBAColor(r: 0.45, g: 0.70, b: 0.40)),
-                (0.5, 0.9, RGBAColor(r: 0.15, g: 0.50, b: 0.35)),
-                (0.95, 0.75, RGBAColor(r: 0.75, g: 0.85, b: 0.50)),
-            ], warp: 0.05)
-        case "midnight":
-            return Preset(points: [
-                (0.0, 0.0, RGBAColor(r: 0.05, g: 0.05, b: 0.15)),
-                (0.7, 0.3, RGBAColor(r: 0.20, g: 0.15, b: 0.45)),
-                (0.2, 0.8, RGBAColor(r: 0.08, g: 0.10, b: 0.30)),
-                (1.0, 1.0, RGBAColor(r: 0.35, g: 0.20, b: 0.55)),
-            ], warp: 0.03)
-        case "peach":
-            return Preset(points: [
-                (0.1, 0.1, RGBAColor(r: 1.00, g: 0.85, b: 0.75)),
-                (0.9, 0.3, RGBAColor(r: 0.98, g: 0.70, b: 0.65)),
-                (0.3, 0.9, RGBAColor(r: 0.95, g: 0.80, b: 0.90)),
-                (0.95, 0.95, RGBAColor(r: 1.00, g: 0.90, b: 0.70)),
-            ], warp: 0.05)
-        default:  // "aurora"
-            return Preset(points: [
-                (0.0, 0.1, RGBAColor(r: 0.20, g: 0.15, b: 0.55)),
-                (0.6, 0.0, RGBAColor(r: 0.25, g: 0.70, b: 0.85)),
-                (1.0, 0.5, RGBAColor(r: 0.55, g: 0.30, b: 0.85)),
-                (0.3, 1.0, RGBAColor(r: 0.20, g: 0.80, b: 0.60)),
-                (0.85, 0.95, RGBAColor(r: 0.90, g: 0.45, b: 0.70)),
-            ], warp: 0.06)
-        }
-    }
+    public static let names: [String] = BackgroundPresets.legacyWallpaperNames
 }
 
 /// sRGB / OKLab helpers used to prepare uniforms on the CPU.
@@ -70,6 +17,23 @@ enum ColorMath {
 
     static func linear(_ c: RGBAColor) -> SIMD3<Double> {
         SIMD3(srgbToLinear(c.r), srgbToLinear(c.g), srgbToLinear(c.b))
+    }
+
+    static func linearToSrgb(_ c: Double) -> Double {
+        let v = max(0, min(1, c))
+        return v <= 0.0031308 ? v * 12.92 : 1.055 * pow(v, 1 / 2.4) - 0.055
+    }
+
+    static func oklabToLinear(_ lab: SIMD3<Double>) -> SIMD3<Double> {
+        let l_ = lab.x + 0.3963377774 * lab.y + 0.2158037573 * lab.z
+        let m_ = lab.x - 0.1055613458 * lab.y - 0.0638541728 * lab.z
+        let s_ = lab.x - 0.0894841775 * lab.y - 1.2914855480 * lab.z
+        let l = l_ * l_ * l_, m = m_ * m_ * m_, s = s_ * s_ * s_
+        return SIMD3(
+            4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+            -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+            -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s
+        )
     }
 
     static func oklab(_ c: RGBAColor) -> SIMD3<Double> {

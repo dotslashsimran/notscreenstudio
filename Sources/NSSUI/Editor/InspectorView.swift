@@ -19,12 +19,10 @@ struct EditSlider: View {
 
 /// The inspector: collapsible sections in a fixed order (Background, Frame, Cursor, Zoom, Camera, Audio).
 ///
-/// Worker slots: the Background and Zoom sections each contain one clearly marked slot. Worker B replaces
-/// `backgroundSlot` with `BackgroundPicker(model:)` and worker C replaces `zoomSlot` with `ZoomInspector(model:)`.
-/// Until then the slots show the original controls, restyled with the shared rows.
+/// Worker slots: the Background and Zoom sections each contain one clearly marked slot. The Background slot
+/// holds `BackgroundPicker(model:)`; worker C replaces `zoomSlot` with `ZoomInspector(model:)`.
 struct InspectorView: View {
     let model: EditorModel
-    @State private var fileError: String?
 
     var body: some View {
         ScrollView {
@@ -69,76 +67,10 @@ struct InspectorView: View {
         }
     }
 
-    // MARK: SLOT (worker B): Background. Replace the body of `backgroundSlot` with `BackgroundPicker(model: model)`.
+    // MARK: Background (worker B: BackgroundPicker in Editor/Inspector/)
 
     private var backgroundSlot: some View {
-        let bg = model.project.style.background
-        let kind = InspectorBindings.kind(of: bg)
-        return InspectorSlot {
-            InspectorSegmentedRow(selection: Binding(
-                get: { kind },
-                set: { k in model.setStyle(\.background, InspectorBindings.background(switchingTo: k, from: bg), name: "Background") }
-            ), options: InspectorBindings.BackgroundKind.allCases.map { ($0, $0.rawValue) })
-            switch bg {
-            case .solid(let c):
-                InspectorColorRow("Color", color: Binding(
-                    get: { InspectorBindings.color(c) },
-                    set: { model.setStyle(\.background, .solid(InspectorBindings.rgba($0)), name: "Background Color", coalescingKey: "bgcolor") }
-                ))
-            case .gradient(let stops, let angle):
-                ForEach(Array(stops.enumerated()), id: \.offset) { i, stop in
-                    InspectorColorRow("Stop \(i + 1)", color: Binding(
-                        get: { InspectorBindings.color(stop.color) },
-                        set: { new in
-                            var s = stops
-                            s[i].color = InspectorBindings.rgba(new)
-                            model.setStyle(\.background, .gradient(stops: s, angleDegrees: angle), name: "Gradient", coalescingKey: "stop\(i)")
-                        }
-                    ))
-                }
-                EditSlider(model: model, title: "Angle", value: Binding(
-                    get: { angle },
-                    set: { model.setStyle(\.background, .gradient(stops: stops, angleDegrees: $0), name: "Gradient Angle") }
-                ), range: 0...360, format: InspectorFormat.degrees)
-            case .image(let file):
-                HStack {
-                    Text(file.isEmpty ? "No image" : (file as NSString).lastPathComponent).editorLabel(.caption).lineLimit(1)
-                    Spacer()
-                    Button("Choose…") { chooseImage() }.buttonStyle(.editorSecondary)
-                }
-                if let fileError { Text(fileError).font(.system(size: 11)).foregroundStyle(EditorTheme.destructive) }
-            case .wallpaper(let name):
-                InspectorPickerRow("Wallpaper", selection: Binding(
-                    get: { name },
-                    set: { model.setStyle(\.background, .wallpaper(name: $0), name: "Wallpaper") }
-                ), options: InspectorBindings.wallpapers.map { ($0, $0) })
-            }
-        }
-    }
-
-    private func chooseImage() {
-        let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.image]
-        panel.allowsMultipleSelection = false
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        // Copy into the bundle (off the main thread) so the project stays self-contained.
-        let name = "background-" + url.lastPathComponent
-        let dest = model.reference.url.appendingPathComponent(name)
-        Task {
-            let result: Result<Void, Error> = await Task.detached {
-                Result {
-                    if FileManager.default.fileExists(atPath: dest.path) { try FileManager.default.removeItem(at: dest) }
-                    try FileManager.default.copyItem(at: url, to: dest)
-                }
-            }.value
-            switch result {
-            case .success:
-                fileError = nil
-                model.setStyle(\.background, .image(file: name), name: "Background Image")
-            case .failure(let error):
-                fileError = "Couldn't copy image: \(error.localizedDescription)"
-            }
-        }
+        BackgroundPicker(model: model)
     }
 
     // MARK: Frame

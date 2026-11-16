@@ -135,6 +135,39 @@ Open each recording in the editor and check the following.
 27g. With 30 or more recordings (copy one `.nssproj` folder several times in Finder), scroll the grid.
     - Good: scrolling stays smooth and the app stays responsive while thumbnails fill in.
 
+## Round 3: Backgrounds
+
+Open any recording in the editor. All checks are in the inspector's Background section and the preview.
+
+B1. Look at the Background section.
+    - Good: a segmented control with Wallpapers, Gradients, Colours and Image, and a grid of thumbnails under it. The tab that is open matches the current background (a new project opens on Gradients).
+B2. Click Wallpapers.
+    - Good: a spinner shows briefly, then the macOS wallpapers on this Mac appear (for example Sonoma, Sequoia Sunrise, Sonoma Horizon, iMac Blue … Yellow, Radial Sky Blue). Wallpapers that macOS only lists as downloads (`.madesktop` such as Big Sur, Catalina) are not shown, because their full image is not on the Mac. The editor stays responsive while thumbnails fill in.
+B3. Click a wallpaper.
+    - Good: it gets a blue ring and the preview shows it behind the recording right away (a large HEIC may take a fraction of a second the first time). Dynamic wallpapers show one still image.
+B4. Drag the Blur slider from 0 to 100 % and back.
+    - Good: the wallpaper blurs smoothly while you drag, the preview stays fluid, and 0 % is fully sharp again. Undo (Cmd-Z) after the drag undoes the whole drag in one step.
+B5. Close and reopen the Wallpapers tab, then quit and relaunch the app and open it again.
+    - Good: the thumbnails appear almost instantly the second time (they are cached on disk in `~/Library/Caches/notscreenstudio/BackgroundThumbnails`).
+B6. Click Gradients.
+    - Good: 16 thumbnails: 8 smooth linear gradients, then 8 soft multi-colour mesh gradients. Clicking one shows it in the preview immediately. When a linear gradient is selected an Angle slider appears and rotates it.
+B7. Click Colours. Click a few swatches, then use "Custom colour" to pick any colour.
+    - Good: each pick shows at once. A custom colour that matches no swatch leaves no swatch ringed.
+B8. Click Image, then the + tile. Pick a large photo (JPEG, PNG or HEIC).
+    - Good: the photo becomes the background, aspect-filled, with no grey frame. A tile for the current image is ringed, and the photo is listed after it in the recents.
+B9. Set Blur to about 40 %.
+    - Good: the photo blurs. The Blur slider is greyed out on the Wallpapers and Image tabs while a gradient or colour is the background.
+B10. Pick a second, different image that has the same file name as the first (from another folder). Then press Cmd-Z.
+    - Good: the second image shows; undo brings the first one back (they do not overwrite each other inside the project).
+B11. Open a different recording and go to Image.
+    - Good: the images you picked before are listed as recents (most recent first, at most 8). Clicking one uses it in this project. Right-click a recent and choose Remove from Recents to drop it.
+B12. Export the recording at 1080p with a blurred wallpaper, then again with a blurred picked image, and with a mesh gradient.
+    - Good: in each export the background looks exactly like the preview, including the amount of blur (blur is relative to the image, so 1080p and 4K look the same).
+B13. Quit, relaunch and reopen the project.
+    - Good: the background and the blur amount are as you left them.
+B14. Open a project saved by the Round 2 app with a Wallpaper background (for example "Sunset").
+    - Good: it opens without an error and looks the same as before; the Gradients tab now shows it as a mesh gradient (the project file is migrated to schema 2).
+
 ## 6. Quick regression check for the automated tests
 
 28. In the repo run `swift test -j 2`. Optionally run `NSS_E2E_4K=1 swift test -j 2 --filter EndToEndExportTests` for the 4K exports, and `NSS_BENCH=1 swift test -j 2 --filter PreviewPerformanceTests` for the preview timing budget. `swift test -j 2 --filter ParityTests` prints the export-versus-preview numbers, `--filter EdgeGapTests` checks the corner and edge clicks, and `NSS_BENCH=1 ... --filter PreviewPerformanceTests` prints the frame time report.

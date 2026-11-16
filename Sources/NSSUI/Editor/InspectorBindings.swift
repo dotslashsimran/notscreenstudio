@@ -13,9 +13,9 @@ public enum InspectorBindings {
     public static func kind(of b: Background) -> BackgroundKind {
         switch b {
         case .solid: .solid
-        case .gradient: .gradient
+        case .gradient, .mesh: .gradient
         case .image: .image
-        case .wallpaper: .wallpaper
+        case .wallpaper, .systemWallpaper: .wallpaper
         }
     }
 
