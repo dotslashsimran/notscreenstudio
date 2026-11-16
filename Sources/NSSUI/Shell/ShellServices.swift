@@ -80,10 +80,10 @@ public protocol PermissionsProviding: Sendable {
     func request(_ kind: PermissionKind) async -> PermissionState
     /// Opens the System Settings pane where the user can fix a denied permission.
     func openSettings(for kind: PermissionKind)
-    /// The authoritative check (for screen recording: ScreenCaptureKit). Never prompts.
+    /// The authoritative check (for screen recording: ScreenCaptureKit). 
     /// The authoritative check. It can raise the macOS prompt for an unapproved app, so `userInitiated` is true
     /// only for a click on Allow or Check Again. Automatic callers (launch, activation) pass false and may be
-    /// refused or rate limited, in which case the answer is the quick `status`.
+    /// refused or rate limited, in which case the answer is the last real verdict, or the quick hint if none.
     func probe(_ kind: PermissionKind, userInitiated: Bool) async -> PermissionState
     /// The app became active: allows one more automatic probe.
     func noteActivation()

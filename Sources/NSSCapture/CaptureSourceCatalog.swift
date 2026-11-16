@@ -37,7 +37,7 @@ public struct CaptureSourceList: Sendable {
 public enum CaptureSourceCatalog {
     public static func load(includeThumbnails: Bool = false, thumbnailMaxSize: CGSize = CGSize(width: 320, height: 200)) async throws -> CaptureSourceList {
         // SCShareableContent can show the system prompt for an app with no decision yet. Do not call it before
-        // the preflight says yes or the user clicked Allow / Check Again in this process.
+        // the preflight says yes or an earlier probe in this process succeeded.
         guard CapturePermissions.screenRecordingGranted || ScreenRecordingGate.system.mayTouchScreenCaptureKit else {
             throw NSSError.permissionDenied(ScreenRecordingAccess.settingsHint)
         }
@@ -45,9 +45,11 @@ public enum CaptureSourceCatalog {
         do {
             content = try await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: true)
             ScreenRecordingCache.store(true)
+            ScreenRecordingGate.system.recordProbeResult(granted: true)
         } catch {
             let ns = error as NSError
             ScreenRecordingCache.store(false)
+            ScreenRecordingGate.system.recordProbeResult(granted: false)
             if PermissionDiagnostics.isEnabled {
                 PermissionDiagnostics.log(ScreenRecordingAccess(preflight: CGPreflightScreenCaptureAccess(), shareable: .failed(domain: ns.domain, code: ns.code)))
             }

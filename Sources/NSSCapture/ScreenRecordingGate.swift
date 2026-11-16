@@ -21,7 +21,7 @@ public final class ScreenRecordingGate: @unchecked Sendable {
     }
 
     private struct State {
-        var userEngaged = false
+        var confirmedGranted = false
         var activation = 0
         var lastAutomaticActivation = -1
     }
@@ -56,16 +56,19 @@ public final class ScreenRecordingGate: @unchecked Sendable {
     /// Marks the start of a new app activation, which allows one more automatic probe.
     public func noteActivation() { state.withLock { $0.activation += 1 } }
 
-    /// True if the user clicked Allow or Check Again in this process.
-    public var userEngaged: Bool { state.withLock { $0.userEngaged } }
+    /// True if a probe in this process actually succeeded. A user click alone never sets it.
+    public var confirmedGranted: Bool { state.withLock { $0.confirmedGranted } }
+
+    /// Records what a probe found, so later automatic checks are allowed only after a real success.
+    public func recordProbeResult(granted: Bool) { state.withLock { $0.confirmedGranted = granted } }
+
+    private var mayProbeAutomatically: Bool { preflight() || confirmedGranted }
 
     /// May a call that can prompt (SCShareableContent) run now? Consumes the automatic allowance when it says yes.
     public func authorizeProbe(_ trigger: Trigger) -> Bool {
-        if trigger == .user {
-            state.withLock { $0.userEngaged = true }
-            return true
-        }
-        guard preflight() || userEngaged else { return false }
+        // A click authorizes only the probe made by that click, never later automatic ones.
+        if trigger == .user { return true }
+        guard mayProbeAutomatically else { return false }
         return state.withLock { s in
             guard s.lastAutomaticActivation != s.activation else { return false }
             s.lastAutomaticActivation = s.activation
@@ -74,13 +77,12 @@ public final class ScreenRecordingGate: @unchecked Sendable {
     }
 
     /// Can something that may prompt (the source list) run? Never because of the persisted flag alone.
-    public var mayTouchScreenCaptureKit: Bool { preflight() || userEngaged }
+    public var mayTouchScreenCaptureKit: Bool { mayProbeAutomatically }
 
     /// The explicit Allow action. Calls `CGRequestScreenCaptureAccess` once per identity and returns whether it
     /// was called. Never call this from anything but a user click.
     @discardableResult
     public func requestFromUserAction() -> Bool {
-        state.withLock { $0.userEngaged = true }
         guard !asked else { return false }
         markAsked()
         _ = request()
@@ -94,12 +96,18 @@ extension ScreenRecordingGate {
     static let askedIdentityKey = "notscreenstudio.shell.askedScreenRecordingIdentity"
 
     /// The gate used by the app: real preflight, real request, UserDefaults, and this process's signature.
-    static let system = ScreenRecordingGate(
+    static let system: ScreenRecordingGate = {
+        // One-time migration: the old boolean flag was not tied to a signing identity.
+        UserDefaults.standard.removeObject(forKey: "notscreenstudio.shell.askedScreenRecording")
+        return make()
+    }()
+
+    private static func make() -> ScreenRecordingGate { ScreenRecordingGate(
         preflight: { CGPreflightScreenCaptureAccess() },
-        identity: { SigningIdentity.current },
+        identity: { SigningIdentity.current ?? "unreadable-signing-identity" },
         loadAskedIdentity: { UserDefaults.standard.string(forKey: askedIdentityKey) },
         saveAskedIdentity: { UserDefaults.standard.set($0, forKey: askedIdentityKey) },
-        request: { CGRequestScreenCaptureAccess() })
+        request: { CGRequestScreenCaptureAccess() }) }
 }
 
 /// A string that changes when the app's signature changes (and so when macOS stops matching its permission).

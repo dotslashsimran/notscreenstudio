@@ -51,12 +51,26 @@ private final class FakeWorld: @unchecked Sendable {
         #expect(g.authorizeProbe(.automatic))
     }
 
-    @Test func userClickAllowsProbeWithoutPreflight() {
+    @Test func userClickAuthorizesOnlyItsOwnProbe() {
         let w = FakeWorld()
         let g = w.gate()
         #expect(g.authorizeProbe(.user))
-        #expect(g.authorizeProbe(.user))
+        #expect(g.requestFromUserAction())
+        g.noteActivation()
+        #expect(!g.authorizeProbe(.automatic)) // dismissing the dialog re-activates the app
+        #expect(!g.mayTouchScreenCaptureKit)
+        g.recordProbeResult(granted: false)
+        g.noteActivation()
+        #expect(!g.authorizeProbe(.automatic))
+        #expect(!g.mayTouchScreenCaptureKit)
+    }
+
+    @Test func successfulProbeAllowsLaterAutomaticOnes() {
+        let w = FakeWorld()
+        let g = w.gate()
+        g.recordProbeResult(granted: true)
         #expect(g.mayTouchScreenCaptureKit)
+        #expect(g.authorizeProbe(.automatic))
     }
 
     @Test func flagIsIgnoredAfterSigningIdentityChanges() {
