@@ -307,12 +307,13 @@ public enum ZoomPlanner {
 
     // MARK: Helpers
 
-    /// Ease durations are spring responses; keep them in a range the springs handle well.
-    public static let easeRange: ClosedRange<Double> = 0.05...5
+    /// Safety clamp for stored ease durations (spring responses). The inspector offers the narrower
+    /// `ZoomBlockEditing.easeRange`; this only guards hand-edited or corrupt project files.
+    public static let easeClampRange: ClosedRange<Double> = 0.05...5
 
     static func clampEase(_ e: Double) -> Double {
         guard e.isFinite else { return ZoomBlock.defaultEase }
-        return min(max(e, easeRange.lowerBound), easeRange.upperBound)
+        return min(max(e, easeClampRange.lowerBound), easeClampRange.upperBound)
     }
 
     static func clampScale(_ s: Double, _ tuning: MotionTuning) -> Double {

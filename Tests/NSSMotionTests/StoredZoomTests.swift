@@ -119,10 +119,10 @@ import NSSCore
 
     @Test func easeValuesAreClampedAndNonFiniteFallsBack() {
         #expect(ZoomPlanner.clampEase(.nan) == ZoomBlock.defaultEase)
-        #expect(ZoomPlanner.clampEase(0) == ZoomPlanner.easeRange.lowerBound)
-        #expect(ZoomPlanner.clampEase(100) == ZoomPlanner.easeRange.upperBound)
+        #expect(ZoomPlanner.clampEase(0) == ZoomPlanner.easeClampRange.lowerBound)
+        #expect(ZoomPlanner.clampEase(100) == ZoomPlanner.easeClampRange.upperBound)
         let b = ZoomBlock(start: 1, end: 3, easeIn: .infinity, easeOut: -1)
         let segs = ZoomPlanner.manualSegments(track: .empty, blocks: [b], duration: 5, tuning: .standard)
-        #expect(segs[0].easeIn == ZoomBlock.defaultEase && segs[0].easeOut == ZoomPlanner.easeRange.lowerBound)
+        #expect(segs[0].easeIn == ZoomBlock.defaultEase && segs[0].easeOut == ZoomPlanner.easeClampRange.lowerBound)
     }
 }
