@@ -327,7 +327,12 @@ GitHub Actions runs on every pull request and on pushes to `main`. It runs on `m
 2. Make your change. Run `swift build` and `swift test` (add `-j 2` on a small Mac).
 3. Open a pull request against `main`. The CI check must pass.
 4. Read [AGENTS.md](AGENTS.md) first. It has the coding rules.
+5. Contributions are accepted under the same license (MIT).
 
 ## Video credits
 
 The memes in the launch video are made for it, using photos from Wikimedia Commons: Ed Sheeran by Harald Krichel (CC BY-SA 3.0), Eva Rinaldi (CC BY-SA 2.0), Patrick Cristiano (CC BY-SA 4.0), Sean Reynolds (CC BY 2.0) and Drew de F Fawkes (CC BY 2.0); cats by DGtal (CC BY-SA 4.0), Keren Dvir (CC BY-SA 4.0) and Sebastian Rosa (CC0); carrots by Evan-Amos (public domain). The desktop wallpaper is Apple's Sequoia Sunrise.
+
+## License
+
+notscreenstudio is released under the MIT License. See [LICENSE](LICENSE).
