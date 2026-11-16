@@ -21,7 +21,7 @@ public struct PermissionsView: View {
             }
             HStack {
                 Spacer()
-                Button("Check Again") { Task { await model.refreshPermissionsAuthoritative() } }
+                Button("Check Again") { Task { await model.checkAgain() } }
             }
         }
         .padding(24)

@@ -88,12 +88,18 @@ enum ScreenRecordingCache {
 }
 
 extension CapturePermissions {
-    /// The authoritative check: asks ScreenCaptureKit for shareable content. It never calls
-    /// `CGRequestScreenCaptureAccess`, and it skips ScreenCaptureKit (which could show the system prompt) until the
-    /// user has asked for the permission once or the preflight hint is already true.
-    public static func checkScreenRecording() async -> ScreenRecordingAccess {
+    /// The authoritative check: asks ScreenCaptureKit for shareable content, which can show the system prompt for
+    /// an app that is not approved. `ScreenRecordingGate` decides whether it may run: only when the preflight is
+    /// true or the user clicked Allow / Check Again, and `.automatic` checks at most once per app activation.
+    /// Otherwise the answer is the preflight hint alone. It never calls `CGRequestScreenCaptureAccess`.
+    public static func checkScreenRecording(_ trigger: ScreenRecordingGate.Trigger = .automatic) async -> ScreenRecordingAccess {
+        let gate = ScreenRecordingGate.system
+        guard gate.authorizeProbe(trigger) else {
+            // Not allowed to probe: answer from the preflight hint alone and leave the cache alone.
+            return ScreenRecordingAccess(preflight: CGPreflightScreenCaptureAccess(), shareable: nil)
+        }
         let access = await ScreenRecordingAccess.evaluate(
-            asked: screenRecordingAsked,
+            asked: true,
             preflight: { CGPreflightScreenCaptureAccess() },
             shareable: { await probeShareableContent() })
         ScreenRecordingCache.store(access.isGranted)

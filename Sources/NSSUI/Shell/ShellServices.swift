@@ -81,11 +81,17 @@ public protocol PermissionsProviding: Sendable {
     /// Opens the System Settings pane where the user can fix a denied permission.
     func openSettings(for kind: PermissionKind)
     /// The authoritative check (for screen recording: ScreenCaptureKit). Never prompts.
-    func probe(_ kind: PermissionKind) async -> PermissionState
+    /// The authoritative check. It can raise the macOS prompt for an unapproved app, so `userInitiated` is true
+    /// only for a click on Allow or Check Again. Automatic callers (launch, activation) pass false and may be
+    /// refused or rate limited, in which case the answer is the quick `status`.
+    func probe(_ kind: PermissionKind, userInitiated: Bool) async -> PermissionState
+    /// The app became active: allows one more automatic probe.
+    func noteActivation()
 }
 
 extension PermissionsProviding {
-    public func probe(_ kind: PermissionKind) async -> PermissionState { status(of: kind) }
+    public func probe(_ kind: PermissionKind) async -> PermissionState { await probe(kind, userInitiated: false) }
+    public func noteActivation() {}
 }
 
 /// Pure helpers for permissions UI and the settings deep links.
@@ -202,21 +208,23 @@ public struct SystemPermissions: PermissionsProviding {
         }
     }
 
-    public func probe(_ kind: PermissionKind) async -> PermissionState {
+    public func probe(_ kind: PermissionKind, userInitiated: Bool) async -> PermissionState {
         guard kind == .screenRecording else { return status(of: kind) }
-        let access = await CapturePermissions.checkScreenRecording()
+        let access = await CapturePermissions.checkScreenRecording(userInitiated ? .user : .automatic)
         if access.isGranted { return .granted }
         return CapturePermissions.screenRecordingAsked ? .denied : .notDetermined
     }
 
+    public func noteActivation() { CapturePermissions.noteAppActivation() }
+
     public func request(_ kind: PermissionKind) async -> PermissionState {
         switch kind {
         case .screenRecording:
-            // Ask once only. Repeated calls just reopen the system dialog and never help.
-            if !CapturePermissions.screenRecordingAsked {
-                _ = CapturePermissions.requestScreenRecording() // records that we asked
-            }
-            return await probe(.screenRecording)
+            // One system prompt per click, and only if this signing identity has not asked yet. We do not probe
+            // here: ScreenCaptureKit would raise a second prompt while the first is still showing. The model
+            // follows up with a state read, and "Check again" or the next launch confirms the grant.
+            _ = CapturePermissions.requestScreenRecording()
+            return status(of: .screenRecording)
         case .camera: _ = await CapturePermissions.requestCamera()
         case .microphone: _ = await CapturePermissions.requestMicrophone()
         }
@@ -268,7 +276,11 @@ public final class ProbeCounter: @unchecked Sendable {
     private var value = 0
     public init() {}
     public var count: Int { lock.lock(); defer { lock.unlock() }; return value }
+    private var userValue = 0
+    /// Probes that were started by a user click.
+    public var userCount: Int { lock.lock(); defer { lock.unlock() }; return userValue }
     func increment() { lock.lock(); value += 1; lock.unlock() }
+    func incrementUser() { lock.lock(); userValue += 1; lock.unlock() }
 }
 
 /// Inert permissions for tests and previews. Nothing here touches the system.
@@ -290,8 +302,9 @@ public struct StubPermissions: PermissionsProviding {
     }
     /// Counts `probe` calls so tests can check that quick repeated clicks run one probe.
     public let probeCounter = ProbeCounter()
-    public func probe(_ kind: PermissionKind) async -> PermissionState {
+    public func probe(_ kind: PermissionKind, userInitiated: Bool) async -> PermissionState {
         probeCounter.increment()
+        if userInitiated { probeCounter.incrementUser() }
         return probeResults[kind] ?? status(of: kind)
     }
     public func status(of kind: PermissionKind) -> PermissionState { states[kind] ?? .notDetermined }
