@@ -61,6 +61,7 @@ jobs:
             --keychain "$KEYCHAIN"
           echo "NSS_SIGN_IDENTITY=$SIGN_IDENTITY" >> "$GITHUB_ENV"
           echo "NSS_NOTARY_PROFILE=notary-profile" >> "$GITHUB_ENV"
+          echo "NSS_NOTARY_KEYCHAIN=$KEYCHAIN" >> "$GITHUB_ENV"
 
       - name: Build and package (runs the smoke test)
         run: ./scripts/package.sh "$TAG"

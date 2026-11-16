@@ -8,6 +8,7 @@
 #   NSS_JOBS, NSS_SKIP_SMOKE   As in bundle.sh
 #   NSS_SIGN_IDENTITY    Signing identity. With NSS_HARDENED=1 it signs with the hardened runtime.
 #   NSS_NOTARY_PROFILE   notarytool keychain profile. When set, the zip is notarized and the app stapled.
+#   NSS_NOTARY_KEYCHAIN  Optional keychain file that holds the profile (default: the login keychain).
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -45,7 +46,9 @@ if [ -n "${NSS_NOTARY_PROFILE:-}" ]; then
   [ "$NSS_SIGN_IDENTITY" != "-" ] || { echo "Notarization needs NSS_SIGN_IDENTITY" >&2; exit 1; }
   SUBMIT_ZIP="$(mktemp -d)/submit.zip"
   ditto -c -k --keepParent "$APP" "$SUBMIT_ZIP"
-  xcrun notarytool submit "$SUBMIT_ZIP" --keychain-profile "$NSS_NOTARY_PROFILE" --wait
+  NOTARY_ARGS=(--keychain-profile "$NSS_NOTARY_PROFILE")
+  if [ -n "${NSS_NOTARY_KEYCHAIN:-}" ]; then NOTARY_ARGS+=(--keychain "$NSS_NOTARY_KEYCHAIN"); fi
+  xcrun notarytool submit "$SUBMIT_ZIP" "${NOTARY_ARGS[@]}" --wait
   xcrun stapler staple "$APP"
   xcrun stapler validate "$APP"
 fi
