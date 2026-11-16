@@ -36,7 +36,24 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-codesign --force --deep -s - "$APP"
+# Signing identity: NSS_SIGN_IDENTITY if set, else a "notscreenstudio-dev" identity if the keychain has one
+# (create it once with scripts/make-dev-cert.sh), else ad hoc. A stable identity keeps Screen Recording,
+# Camera and Microphone permission across rebuilds. This script never creates keychain items.
+SIGN_ID="${NSS_SIGN_IDENTITY:-}"
+if [ -z "$SIGN_ID" ]; then
+  # Capture first: `grep -q` closing the pipe early would trip pipefail. -v lists only identities codesign accepts.
+  IDENTITIES="$(security find-identity -v -p codesigning 2>/dev/null || true)"
+  case "$IDENTITIES" in
+    *'"notscreenstudio-dev"'*) SIGN_ID="notscreenstudio-dev" ;;
+  esac
+fi
+if [ -n "$SIGN_ID" ]; then
+  echo "Signing with identity: $SIGN_ID"
+  codesign --force --deep -s "$SIGN_ID" "$APP"
+else
+  echo "Signing ad hoc (permissions may reset after each rebuild; see README > Permissions)"
+  codesign --force --deep -s - "$APP"
+fi
 codesign --verify --verbose "$APP"
 # Non-interactive launch check: builds every dependency and renders one frame, then exits 0.
 # Set NSS_SKIP_SMOKE=1 to skip it (for example over SSH without a GUI session).

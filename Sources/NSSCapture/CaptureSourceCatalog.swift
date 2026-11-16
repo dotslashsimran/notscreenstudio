@@ -36,13 +36,21 @@ public struct CaptureSourceList: Sendable {
 /// Lists displays and windows for the source picker. Needs screen recording permission.
 public enum CaptureSourceCatalog {
     public static func load(includeThumbnails: Bool = false, thumbnailMaxSize: CGSize = CGSize(width: 320, height: 200)) async throws -> CaptureSourceList {
-        guard CapturePermissions.screenRecordingGranted else {
-            throw NSSError.permissionDenied("Screen recording permission is required to list displays and windows.")
+        // SCShareableContent can show the system prompt for an app with no decision yet. Do not call it before
+        // the user has asked for the permission (or the preflight already says yes).
+        guard CapturePermissions.screenRecordingGranted || CapturePermissions.screenRecordingAsked else {
+            throw NSSError.permissionDenied(ScreenRecordingAccess.settingsHint)
         }
         let content: SCShareableContent
         do {
             content = try await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: true)
+            ScreenRecordingCache.store(true)
         } catch {
+            let ns = error as NSError
+            ScreenRecordingCache.store(false)
+            if PermissionDiagnostics.isEnabled {
+                PermissionDiagnostics.log(ScreenRecordingAccess(preflight: CGPreflightScreenCaptureAccess(), shareable: .failed(domain: ns.domain, code: ns.code)))
+            }
             throw CaptureErrorMapper.map(error)
         }
         let names = await screenNames()

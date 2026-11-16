@@ -266,3 +266,23 @@ import NSSCore
         for kind in ShapeKind.allCases { #expect(ShapeKind(kind.shape) == kind) }
     }
 }
+
+@Suite struct CapturePrivacyPolicyTests {
+    @Test func overlaysAreAlwaysExcluded() {
+        for kind in [CapturePrivacyPolicy.WindowKind.setupBar, .countdown, .recordingBar, .cameraBubble, .areaSelection] {
+            #expect(CapturePrivacyPolicy.shouldExclude(kind, preparingOrRecording: true))
+        }
+    }
+
+    @Test func permissionsEditorAndHomeStayCapturable() {
+        for kind in [CapturePrivacyPolicy.WindowKind.permissions, .editor, .home] {
+            #expect(!CapturePrivacyPolicy.shouldExclude(kind, preparingOrRecording: true))
+            #expect(!CapturePrivacyPolicy.shouldExclude(kind, preparingOrRecording: false))
+        }
+    }
+
+    @Test func menuIsExcludedOnlyWhilePreparingOrRecording() {
+        #expect(CapturePrivacyPolicy.shouldExclude(.menu, preparingOrRecording: true))
+        #expect(!CapturePrivacyPolicy.shouldExclude(.menu, preparingOrRecording: false))
+    }
+}

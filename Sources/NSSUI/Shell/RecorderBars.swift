@@ -178,6 +178,7 @@ struct RecorderSetupBar: View {
             .help("Start recording (Return)")
         }
         .modifier(BarChrome())
+        .task { await model.watchScreenRecordingPermission() }
     }
 }
 

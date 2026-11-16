@@ -127,6 +127,7 @@ struct ShellRig {
     let effects: ShellFakeEffects
     let store: FileProjectStore
     let library: URL
+    let probeCounter: ProbeCounter
     let defaults: UserDefaults
     let suite: String
 
@@ -139,6 +140,7 @@ struct ShellRig {
         cams: [DeviceItem] = [DeviceItem(id: "cam1", name: "Cam", isDefault: true)],
         windows: [WindowItem] = [WindowItem(id: 55, title: "Doc", appName: "Notes", frame: CGRect(x: 100, y: 100, width: 800, height: 600))],
         requestResults: [PermissionKind: PermissionState] = [:],
+        probeResults: [PermissionKind: PermissionState] = [:],
         initial: ShellSettings? = nil,
         warm useWarm: Bool = false,
         now: @escaping @MainActor () -> Date = { Date() }
@@ -151,6 +153,8 @@ struct ShellRig {
         warm = useWarm ? ShellFakeWarmSession() : nil
         logger = ShellFakeLogger()
         effects = ShellFakeEffects()
+        let stub = StubPermissions(states: permissions, requestResults: requestResults, probeResults: probeResults)
+        probeCounter = stub.probeCounter
         let settingsStore = ShellSettingsStore(defaults: defaults)
         if let initial { settingsStore.save(initial) }
         model = ShellModel(
@@ -159,7 +163,7 @@ struct ShellRig {
                 sources: StubSourceProvider(
                     listing: SourceListing(displays: [Self.mainDisplay, Self.sideDisplay], windows: windows),
                     mics: mics, cams: cams),
-                permissions: StubPermissions(states: permissions, requestResults: requestResults)),
+                permissions: stub),
             effects: effects, settingsStore: settingsStore, now: now)
     }
 

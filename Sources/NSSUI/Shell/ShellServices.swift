@@ -80,6 +80,12 @@ public protocol PermissionsProviding: Sendable {
     func request(_ kind: PermissionKind) async -> PermissionState
     /// Opens the System Settings pane where the user can fix a denied permission.
     func openSettings(for kind: PermissionKind)
+    /// The authoritative check (for screen recording: ScreenCaptureKit). Never prompts.
+    func probe(_ kind: PermissionKind) async -> PermissionState
+}
+
+extension PermissionsProviding {
+    public func probe(_ kind: PermissionKind) async -> PermissionState { status(of: kind) }
 }
 
 /// Pure helpers for permissions UI and the settings deep links.
@@ -190,17 +196,27 @@ public struct SystemPermissions: PermissionsProviding {
         case .screenRecording:
             if CapturePermissions.screenRecordingGranted { return .granted }
             // The system gives no "not asked yet" answer for screen recording, so remember our own request.
-            return UserDefaults.standard.bool(forKey: Self.askedKey) ? .denied : .notDetermined
+            return CapturePermissions.screenRecordingAsked ? .denied : .notDetermined
         case .camera: return Self.map(CapturePermissions.cameraStatus())
         case .microphone: return Self.map(CapturePermissions.microphoneStatus())
         }
     }
 
+    public func probe(_ kind: PermissionKind) async -> PermissionState {
+        guard kind == .screenRecording else { return status(of: kind) }
+        let access = await CapturePermissions.checkScreenRecording()
+        if access.isGranted { return .granted }
+        return CapturePermissions.screenRecordingAsked ? .denied : .notDetermined
+    }
+
     public func request(_ kind: PermissionKind) async -> PermissionState {
         switch kind {
         case .screenRecording:
-            UserDefaults.standard.set(true, forKey: Self.askedKey)
-            _ = CapturePermissions.requestScreenRecording()
+            // Ask once only. Repeated calls just reopen the system dialog and never help.
+            if !CapturePermissions.screenRecordingAsked {
+                _ = CapturePermissions.requestScreenRecording() // records that we asked
+            }
+            return await probe(.screenRecording)
         case .camera: _ = await CapturePermissions.requestCamera()
         case .microphone: _ = await CapturePermissions.requestMicrophone()
         }
@@ -213,8 +229,6 @@ public struct SystemPermissions: PermissionsProviding {
         let url = PermissionInfo.settingsURL(kind)
         Task { @MainActor in Self.open(url) }
     }
-
-    private static let askedKey = "notscreenstudio.shell.askedScreenRecording"
 
     private static func map(_ s: CapturePermissions.Status) -> PermissionState {
         switch s {
@@ -249,17 +263,36 @@ public struct StubSourceProvider: CaptureSourceProviding {
     public func cameras() -> [DeviceItem] { cams }
 }
 
+public final class ProbeCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = 0
+    public init() {}
+    public var count: Int { lock.lock(); defer { lock.unlock() }; return value }
+    func increment() { lock.lock(); value += 1; lock.unlock() }
+}
+
 /// Inert permissions for tests and previews. Nothing here touches the system.
 public struct StubPermissions: PermissionsProviding {
     public var states: [PermissionKind: PermissionState]
     /// What `request` answers for a kind. Kinds not listed answer with their current state.
     public var requestResults: [PermissionKind: PermissionState]
+    /// What `probe` answers for a kind. Kinds not listed answer with their current state, so a test can make the
+    /// authoritative answer differ from the quick `status` hint.
+    public var probeResults: [PermissionKind: PermissionState]
     public init(
         states: [PermissionKind: PermissionState] = [.screenRecording: .granted, .camera: .granted, .microphone: .granted],
-        requestResults: [PermissionKind: PermissionState] = [:]
+        requestResults: [PermissionKind: PermissionState] = [:],
+        probeResults: [PermissionKind: PermissionState] = [:]
     ) {
         self.states = states
         self.requestResults = requestResults
+        self.probeResults = probeResults
+    }
+    /// Counts `probe` calls so tests can check that quick repeated clicks run one probe.
+    public let probeCounter = ProbeCounter()
+    public func probe(_ kind: PermissionKind) async -> PermissionState {
+        probeCounter.increment()
+        return probeResults[kind] ?? status(of: kind)
     }
     public func status(of kind: PermissionKind) -> PermissionState { states[kind] ?? .notDetermined }
     public func request(_ kind: PermissionKind) async -> PermissionState { requestResults[kind] ?? status(of: kind) }

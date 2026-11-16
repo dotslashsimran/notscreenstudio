@@ -20,7 +20,16 @@ Recordings are saved in `~/Movies/notscreenstudio/` as `.nssproj` folders. Expor
 5. Quit the app (menu bar icon, then Quit) and open it again once. Screen Recording only takes effect after a restart.
    - Good: the source list in the menu now shows your displays and windows, with no permission warning.
 
-Note: every time you rebuild with `bundle.sh` the app is signed ad hoc again, so macOS may treat it as a new app. If recording suddenly fails with a permission message, open System Settings, Privacy & Security, remove notscreenstudio from Screen Recording, Camera and Microphone, then add it again and restart the app.
+4a. First launch on a clean state: run `tccutil reset ScreenCapture dev.notscreenstudio.app` and `defaults delete dev.notscreenstudio.app`, then open the app.
+   - Good: no system Screen Recording dialog appears at launch. The Permissions window explains it and shows Allow. The dialog appears only after you click Allow, and only once. Needs a real-machine check: this has not been run on a clean TCC state yet. Expected: nothing prompts until the first Allow click, and no further prompt after that.
+5a. If Screen Recording is still not granted, the Screen Recording row shows a **Relaunch notscreenstudio** button. Turn the app on in System Settings, come back, and watch the row.
+   - Good: the row turns to Allowed within a few seconds without clicking, or after you click Relaunch and the app comes back.
+5b. Start the app from Terminal with `NSS_PERMISSION_DEBUG=1`.
+   - Good: stderr shows the preflight result, the SCShareableContent result or error code, the bundle path and the signing identifier, cdhash and flags.
+5c. Screenshot scope: with the Permissions window open (not recording), take a screenshot (Shift-Command-4, then Space, click the window).
+   - Good: the window appears in the screenshot. While the setup bar, countdown or recording bar is on screen, those bars must not appear in the recording.
+
+Note: by default `bundle.sh` signs ad hoc, so macOS may treat each rebuild as a new app. To keep permissions across rebuilds, run `./scripts/make-dev-cert.sh` once (it creates the `notscreenstudio-dev` identity in your login keychain; `bundle.sh` then uses it, or set `NSS_SIGN_IDENTITY`). Allow the permissions once for the first build signed that way, rebuild, and check that Screen Recording is still allowed.
 
 ## 3. Record
 

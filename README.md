@@ -131,8 +131,9 @@ The app asks for three permissions. Open **Permissions…** from the menu bar ic
 
 Nothing else is needed. The cursor and click log does not need Accessibility or Input Monitoring, and the app never listens to the keyboard.
 
-- **Restart after allowing Screen Recording.** macOS only applies it after the app is quit and opened again. Quit from the menu bar icon, then open the app again.
-- **After every rebuild, you may need to allow again.** Ad-hoc signing gives each build a new code hash, so macOS may treat a rebuilt app as a new app. If recording suddenly fails with a permission message, open System Settings > Privacy & Security, remove notscreenstudio from Screen Recording, Camera and Microphone, add it again, and restart the app.
+- **Relaunch after allowing Screen Recording.** macOS applies the grant only to a new process. The Permissions window shows a **Relaunch notscreenstudio** button until the check passes. The app re-checks when it becomes active and every 2 seconds while the Permissions window is open. The check asks ScreenCaptureKit for the shareable content, which is the real test. `CGPreflightScreenCaptureAccess` is only used as a quick hint.
+- **Keep permissions across rebuilds.** Ad-hoc signing gives each build a new code hash, so macOS treats every rebuild as a new app. To avoid that, create a stable signing identity once: run `./scripts/make-dev-cert.sh`. It is opt-in, only runs when you run it, and adds a self-signed certificate named `notscreenstudio-dev` to your login keychain. After that `./scripts/bundle.sh` signs with it automatically. To use another identity, set `NSS_SIGN_IDENTITY="Your Identity Name"`. With neither, the build is signed ad hoc as before. Allow Screen Recording once for the first build signed with the stable identity; later rebuilds keep it.
+- **Screenshots.** Only the recorder's own overlays (setup bar, countdown, recording bar, camera bubble, area selection) are hidden from screenshots and recordings. The Permissions window, editor and home can be screenshotted.
 
 ## How to use it
 
@@ -216,7 +217,10 @@ A `.nssproj` is a normal folder. You can use Show Package Contents in Finder to 
 ## Troubleshooting
 
 **Recording fails, or the source list is empty.**
-Open **Permissions…** and check that Screen Recording, Camera and Microphone are allowed. Quit and reopen the app after allowing Screen Recording. If you rebuilt the app, remove it from the three lists in System Settings, add it again and restart it (see [Permissions](#permissions)).
+Open **Permissions…** and check that Screen Recording, Camera and Microphone are allowed. Quit and reopen the app after allowing Screen Recording. If you rebuilt the app, remove it from the three lists in System Settings, add it again and restart it (see [Permissions](#permissions)), or use `./scripts/make-dev-cert.sh` once so rebuilds keep their permissions.
+
+**Screen Recording still says it is not allowed.**
+Start the app from Terminal with `NSS_PERMISSION_DEBUG=1 /path/to/NotScreenStudio.app/Contents/MacOS/NotScreenStudio`. It prints, to stderr, the preflight result, the exact ScreenCaptureKit result (error code -3801 means macOS has not granted this build), the bundle path and id, and the code signature (identifier, cdhash, flags). If `adhoc=true` and the cdhash changed since you allowed it, the build is a new app to macOS: use the stable identity above. Run it from Terminal only for diagnosis, because a program started from Terminal can be judged by the permissions of Terminal. Open the app normally with `open` for real use.
 
 **Check that the app's own windows are kept out of the recording.**
 Start the app from Terminal with logging on:

@@ -87,7 +87,7 @@ public struct MenuBarContent: View {
         }
         .padding(12)
         .frame(width: 300)
-        .excludedFromCapture()
+        .excludedFromCapture(when: CapturePrivacyPolicy.shouldExclude(.menu, preparingOrRecording: model.isSettingUp || model.isCountingDown || model.isRecording))
         .background(MenuWindowReader(box: menuWindow).frame(width: 0, height: 0))
         .task { await model.refreshSources() }
     }

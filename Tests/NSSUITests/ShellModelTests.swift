@@ -354,3 +354,66 @@ import NSSCore
         #expect(rig.model.menuBarSymbol == "record.circle.fill")
     }
 }
+
+@MainActor @Suite struct ScreenRecordingProbeStateTests {
+    @Test func probeResultIsNotOverwrittenByTheHint() async {
+        // Preflight says granted, ScreenCaptureKit says denied: the state must stay denied on every refresh.
+        let rig = ShellRig(permissions: [.screenRecording: .granted, .camera: .granted, .microphone: .granted],
+                           probeResults: [.screenRecording: .denied])
+        defer { rig.cleanup() }
+        for _ in 0..<3 {
+            await rig.model.refreshPermissionsAuthoritative()
+            #expect(rig.model.permissionStates[.screenRecording] == .denied)
+            rig.model.refreshPermissions()
+            #expect(rig.model.permissionStates[.screenRecording] == .denied)
+            await rig.model.refreshSources()
+            #expect(rig.model.permissionStates[.screenRecording] == .denied)
+        }
+    }
+
+    @Test func hintDeniedButProbeGrantedShowsTheBarWithoutOnboarding() async {
+        let rig = ShellRig(permissions: [.screenRecording: .denied, .camera: .granted, .microphone: .granted],
+                           probeResults: [.screenRecording: .granted])
+        defer { rig.cleanup() }
+        rig.model.beginSetup()
+        await rig.model.setupProbeTask?.value
+        #expect(rig.effects.setupBarShown)
+        #expect(rig.model.isSettingUp)
+        #expect(rig.model.onboardingRequestID == 0)
+    }
+
+    @Test func bothNotGrantedRequestsOnboardingOnceEvenOnDoubleClick() async {
+        let rig = ShellRig(permissions: [.screenRecording: .denied, .camera: .granted, .microphone: .granted])
+        defer { rig.cleanup() }
+        rig.model.beginSetup()
+        rig.model.beginSetup() // second click while the first probe is in flight
+        await rig.model.setupProbeTask?.value
+        #expect(!rig.effects.setupBarShown)
+        #expect(rig.model.onboardingRequestID == 1)
+    }
+
+    @Test func doubleClickWithGrantedProbeOpensOneBar() async {
+        let rig = ShellRig(permissions: [.screenRecording: .denied, .camera: .granted, .microphone: .granted],
+                           probeResults: [.screenRecording: .granted])
+        defer { rig.cleanup() }
+        rig.model.beginSetup()
+        rig.model.beginSetup()
+        await rig.model.setupProbeTask?.value
+        #expect(rig.probeCounter.count == 1)
+        #expect(rig.effects.setupBarShowCount == 1)
+        #expect(rig.model.onboardingRequestID == 0)
+    }
+
+    @Test func pickingAnotherSourceWhileTheBarIsOpenMovesTheBar() async {
+        let rig = ShellRig()
+        defer { rig.cleanup() }
+        await rig.model.refreshSources()
+        rig.model.pickSource(.display(id: 7))
+        let first = rig.effects.setupBarSourceRect
+        #expect(rig.effects.setupBarShowCount == 1)
+        rig.model.pickSource(.window(id: 55))
+        #expect(rig.effects.setupBarShowCount == 2)
+        #expect(rig.effects.setupBarSourceRect != nil)
+        #expect(rig.effects.setupBarSourceRect != first)
+    }
+}
