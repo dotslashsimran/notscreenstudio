@@ -402,4 +402,17 @@ import NSSCore
         #expect(rig.effects.setupBarShowCount == 1)
         #expect(rig.model.onboardingRequestID == 0)
     }
+
+    @Test func pickingAnotherSourceWhileTheBarIsOpenMovesTheBar() async {
+        let rig = ShellRig()
+        defer { rig.cleanup() }
+        await rig.model.refreshSources()
+        rig.model.pickSource(.display(id: 7))
+        let first = rig.effects.setupBarSourceRect
+        #expect(rig.effects.setupBarShowCount == 1)
+        rig.model.pickSource(.window(id: 55))
+        #expect(rig.effects.setupBarShowCount == 2)
+        #expect(rig.effects.setupBarSourceRect != nil)
+        #expect(rig.effects.setupBarSourceRect != first)
+    }
 }

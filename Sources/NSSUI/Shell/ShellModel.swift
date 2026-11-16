@@ -174,7 +174,8 @@ public final class ShellModel {
 
     /// Shows the control bar for the current source. Record on the bar starts the countdown.
     public func beginSetup() {
-        guard canStart, !isSettingUp, setupProbeTask == nil else { return }
+        // An open bar is repositioned over a newly picked source, so only a pending probe blocks a second call.
+        guard canStart, setupProbeTask == nil else { return }
         refreshPermissions()
         if permissionStates[.screenRecording] == .granted {
             presentSetupBar()
@@ -186,7 +187,7 @@ public final class ShellModel {
             guard let self else { return }
             await self.refreshPermissionsAuthoritative()
             self.setupProbeTask = nil
-            guard self.canStart, !self.isSettingUp else { return }
+            guard self.canStart else { return }
             if self.permissionStates[.screenRecording] == .granted { self.presentSetupBar() } else { self.requestOnboarding() }
         }
     }
