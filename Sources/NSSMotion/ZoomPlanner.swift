@@ -19,14 +19,23 @@ public struct ZoomSegment: Sendable, Equatable {
     /// nil = fixed focus (`ZoomFocus.manual`).
     public var followFrom: MediaTime?
     public var origin: Origin
+    /// Zoom spring response (seconds) while easing in, from `start`.
+    public var easeIn: Double
+    /// Zoom spring response (seconds) while easing back out to 1x, from `end`.
+    public var easeOut: Double
 
-    public init(start: MediaTime, end: MediaTime, scale: Double, initialFocus: NormalizedPoint, followFrom: MediaTime?, origin: Origin) {
+    public init(
+        start: MediaTime, end: MediaTime, scale: Double, initialFocus: NormalizedPoint, followFrom: MediaTime?, origin: Origin,
+        easeIn: Double = ZoomBlock.defaultEase, easeOut: Double = ZoomBlock.defaultEase
+    ) {
         self.start = start
         self.end = end
         self.scale = scale
         self.initialFocus = initialFocus
         self.followFrom = followFrom
         self.origin = origin
+        self.easeIn = easeIn
+        self.easeOut = easeOut
     }
 
     public func contains(_ t: MediaTime) -> Bool { t >= start && t < end }
@@ -125,7 +134,9 @@ public enum ZoomPlanner {
                 scale: clampScale(tuning.autoZoomScale, tuning),
                 initialFocus: cl.first.point.clamped,
                 followFrom: cl.first.t,
-                origin: .auto
+                origin: .auto,
+                easeIn: tuning.zoomSpring.response,
+                easeOut: tuning.zoomSpring.response
             ), cl.release, cl.spatialBreakAfter)
         }
 
@@ -190,14 +201,22 @@ public enum ZoomPlanner {
             let start = max(0, b.start)
             let end = duration > 0 ? min(b.end, duration) : b.end
             guard end > start else { continue }
-            let seg: ZoomSegment
+            var seg: ZoomSegment
             switch b.focus {
             case .manual(let p):
                 seg = ZoomSegment(start: start, end: end, scale: clampScale(b.scale, tuning), initialFocus: p.clamped, followFrom: nil, origin: .manual(b.id))
             case .auto:
-                let p = track.rawPosition(at: start)?.clamped ?? .center
-                seg = ZoomSegment(start: start, end: end, scale: clampScale(b.scale, tuning), initialFocus: p, followFrom: start, origin: .manual(b.id))
+                // Follow the cursor. A click in the block's lead-in is where the action is: aim there
+                // first and start following from the click (like Round 2 auto-zooms did).
+                if let c = leadInClick(track: track, start: start, end: end, tuning: tuning) {
+                    seg = ZoomSegment(start: start, end: end, scale: clampScale(b.scale, tuning), initialFocus: c.point.clamped, followFrom: c.t, origin: .manual(b.id))
+                } else {
+                    let p = track.rawPosition(at: start)?.clamped ?? .center
+                    seg = ZoomSegment(start: start, end: end, scale: clampScale(b.scale, tuning), initialFocus: p, followFrom: start, origin: .manual(b.id))
+                }
             }
+            seg.easeIn = clampEase(b.easeIn)
+            seg.easeOut = clampEase(b.easeOut)
             // A later-starting block takes over only where it overlaps: earlier blocks keep the
             // parts before and after it (e.g. a short block nested inside a long one).
             var next: [ZoomSegment] = []
@@ -241,7 +260,61 @@ public enum ZoomPlanner {
         return out
     }
 
+    /// First mouse-down in `[start, start + autoZoomLeadIn]` (and before `end`), if any.
+    static func leadInClick(track: CursorTrack, start: MediaTime, end: MediaTime, tuning: MotionTuning) -> ClickEvent? {
+        let limit = min(end, start + max(tuning.autoZoomLeadIn, 0) + 1e-6)
+        var best: ClickEvent?
+        for c in track.clicks where c.kind == .down && c.t.isFinite && c.t >= start && c.t <= limit {
+            if best == nil || c.t < best!.t { best = c }
+        }
+        return best
+    }
+
+    // MARK: Stored auto-zoom blocks
+
+    /// Auto-zooms from clicks as stored `ZoomBlock`s (`isAuto`, follow-cursor focus, default ease).
+    /// Parts that overlap `existing` blocks are cut away, and pieces shorter than
+    /// `MotionTuning.minSegmentDuration` are dropped, so the result never overlaps `existing`.
+    public static func autoZoomBlocks(
+        track: CursorTrack,
+        duration: MediaTime,
+        sourceAspect: Double,
+        avoiding existing: [ZoomBlock] = [],
+        tuning: MotionTuning = .standard
+    ) -> [ZoomBlock] {
+        guard duration.isFinite, duration > 0 else { return [] }
+        let segs = autoSegments(track: track, duration: duration, sourceAspect: sourceAspect, tuning: tuning)
+        let taken = existing.filter { $0.start.isFinite && $0.end.isFinite && $0.end > $0.start }
+        var out: [ZoomBlock] = []
+        for seg in segs {
+            var pieces: [(MediaTime, MediaTime)] = [(seg.start, seg.end)]
+            for b in taken {
+                pieces = pieces.flatMap { p -> [(MediaTime, MediaTime)] in
+                    if b.end <= p.0 || b.start >= p.1 { return [p] }
+                    var r: [(MediaTime, MediaTime)] = []
+                    if b.start > p.0 { r.append((p.0, b.start)) }
+                    if b.end < p.1 { r.append((b.end, p.1)) }
+                    return r
+                }
+            }
+            for (a, b) in pieces where b - a >= tuning.minSegmentDuration - 1e-9 {
+                out.append(ZoomBlock(start: a, end: b, scale: seg.scale, focus: .auto, isAuto: true,
+                                     easeIn: tuning.zoomSpring.response, easeOut: tuning.zoomSpring.response))
+            }
+        }
+        return out.sorted { $0.start < $1.start }
+    }
+
     // MARK: Helpers
+
+    /// Safety clamp for stored ease durations (spring responses). The inspector offers the narrower
+    /// `ZoomBlockEditing.easeRange`; this only guards hand-edited or corrupt project files.
+    public static let easeClampRange: ClosedRange<Double> = 0.05...5
+
+    static func clampEase(_ e: Double) -> Double {
+        guard e.isFinite else { return ZoomBlock.defaultEase }
+        return min(max(e, easeClampRange.lowerBound), easeClampRange.upperBound)
+    }
 
     static func clampScale(_ s: Double, _ tuning: MotionTuning) -> Double {
         guard s.isFinite else { return 1 }

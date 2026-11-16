@@ -43,28 +43,7 @@ struct InspectorView: View {
     // MARK: SLOT (worker C): Zoom. Replace the body of `zoomSlot` with `ZoomInspector(model: model)`.
 
     private var zoomSlot: some View {
-        InspectorSlot {
-            InspectorToggleRow("Auto-zoom on clicks", isOn: Binding(get: { model.project.timeline.autoZoomEnabled }, set: { model.setAutoZoom($0) }))
-            InspectorButtonRow(button: "Add zoom at playhead", symbol: "plus") { model.addZoomBlock() }
-            if let z = model.selectedZoom {
-                Divider().overlay(EditorTheme.stroke)
-                EditSlider(model: model, title: "Scale", value: Binding(get: { z.scale }, set: { model.setZoomScale(z.id, $0) }),
-                           range: ZoomBlockEditing.scaleRange, format: InspectorFormat.multiplier)
-                InspectorSegmentedRow("Focus", selection: Binding(
-                    get: { z.focus == .auto },
-                    set: { auto in model.setZoomFocus(z.id, auto ? .auto : .manual(.center)) }
-                ), options: [(true, "Auto"), (false, "Manual")])
-                if case .manual(let p) = z.focus {
-                    InspectorHint(String(format: "Focus %.0f%%, %.0f%%", p.x * 100, p.y * 100))
-                    InspectorButtonRow(button: model.pickingFocusFor == z.id ? "Click in the preview…" : "Pick in preview", symbol: "scope") {
-                        model.pickingFocusFor = model.pickingFocusFor == z.id ? nil : z.id
-                    }
-                }
-                InspectorButtonRow(button: "Delete zoom", symbol: "trash", destructive: true) { model.deleteZoomBlock(z.id) }
-            } else {
-                InspectorHint("Select a zoom block on the timeline to edit it. Double-click the Zoom track to add one.")
-            }
-        }
+        ZoomInspector(model: model)
     }
 
     // MARK: Background (worker B: BackgroundPicker in Editor/Inspector/)

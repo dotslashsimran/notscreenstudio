@@ -210,7 +210,7 @@ import NSSMotion
         m.changeHandler = { seen.append($0) }
         m.setStyle(\.padding, 0.1)
         m.setStyle(\.cursor.size, 3)
-        m.setAutoZoom(false)
+        m.removeAllAutoZooms()
         #expect(seen == [.style, .timeline, .timeline])
     }
 
@@ -228,6 +228,7 @@ import NSSMotion
 
     @Test func zoomBlockLifecycleWithUndo() {
         let m = makeModel()
+        m.removeAllAutoZooms()   // the fixture click at 1 s made an auto zoom on open
         m.playhead = 3
         let id = m.addZoomBlock()
         #expect(id != nil && m.selectedZoomID == id)
@@ -244,6 +245,7 @@ import NSSMotion
 
     @Test func dragMoveIsOneUndoStep() {
         let m = makeModel()
+        m.removeAllAutoZooms()   // the fixture click at 1 s made an auto zoom on open
         let id = m.addZoomBlock(at: 2)!
         let base = m.project.timeline.zoomBlocks
         m.beginGesture("Move Zoom")
@@ -256,6 +258,7 @@ import NSSMotion
 
     @Test func pickFocusSetsManualFocusAndClears() {
         let m = makeModel()
+        m.removeAllAutoZooms()   // the fixture click at 1 s made an auto zoom on open
         let id = m.addZoomBlock(at: 1)!
         m.pickingFocusFor = id
         #expect(m.pickFocus(atOutput: .center, camera: .identity))

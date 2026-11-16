@@ -1,5 +1,6 @@
 import Foundation
 import NSSCore
+import NSSMotion
 
 /// Pure editing rules for the zoom track: blocks never overlap, never shorter than `minLength`,
 /// and always stay inside `0...duration`. All functions return a new array (or nil when the edit is impossible).
@@ -102,13 +103,55 @@ public enum ZoomBlockEditing {
         return result
     }
 
+    /// Applies `f` to block `id`. A block that actually changes becomes manual (`isAuto = false`), so
+    /// "Regenerate auto zooms" never throws away a zoom the user adjusted.
     private static func replacing(_ id: UUID, in blocks: [ZoomBlock], _ f: (inout ZoomBlock) -> Void) -> [ZoomBlock] {
         blocks.map { b in
             guard b.id == id else { return b }
             var c = b
             f(&c)
+            if c != b { c.isAuto = false }
             return c
         }
+    }
+
+    // MARK: Ease
+
+    public static let easeRange: ClosedRange<Double> = 0.1...2
+
+    public static func settingEase(_ id: UUID, easeIn: MediaTime? = nil, easeOut: MediaTime? = nil, in blocks: [ZoomBlock]) -> [ZoomBlock] {
+        func clamp(_ v: MediaTime) -> MediaTime { v.isFinite ? min(max(v, easeRange.lowerBound), easeRange.upperBound) : ZoomBlock.defaultEase }
+        return replacing(id, in: blocks) { b in
+            if let easeIn { b.easeIn = clamp(easeIn) }
+            if let easeOut { b.easeOut = clamp(easeOut) }
+        }
+    }
+
+    // MARK: Auto zooms
+
+    public static func removingAuto(from blocks: [ZoomBlock]) -> [ZoomBlock] { blocks.filter { !$0.isAuto } }
+
+    /// Replaces every auto block with fresh ones from the clicks; manual blocks are kept and win where
+    /// they overlap.
+    public static func regeneratingAuto(
+        in blocks: [ZoomBlock], track: CursorTrack, duration: MediaTime, sourceAspect: Double, tuning: MotionTuning = .standard
+    ) -> [ZoomBlock] {
+        let manual = removingAuto(from: blocks)
+        let auto = ZoomPlanner.autoZoomBlocks(track: track, duration: duration, sourceAspect: sourceAspect, avoiding: manual, tuning: tuning)
+        return sorted(manual + auto)
+    }
+
+    /// One-time migration on open: a timeline that still derives auto-zooms on the fly
+    /// (`autoZoomEnabled`) gets them stored as `isAuto` blocks and the flag cleared. From then on the
+    /// stored blocks are the only zooms the preview and export use. Returns nil when nothing changes.
+    public static func materializingAutoZooms(
+        _ timeline: Timeline, track: CursorTrack, duration: MediaTime, sourceAspect: Double, tuning: MotionTuning = .standard
+    ) -> Timeline? {
+        guard timeline.autoZoomEnabled else { return nil }
+        var t = timeline
+        t.autoZoomEnabled = false
+        t.zoomBlocks = regeneratingAuto(in: timeline.zoomBlocks, track: track, duration: duration, sourceAspect: sourceAspect, tuning: tuning)
+        return t
     }
 }
 
