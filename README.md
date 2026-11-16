@@ -8,6 +8,23 @@ Click the preview to watch the launch video with sound ([docs/launch-preview.mp4
 
 The app is written in Swift 6 with SwiftUI, and it draws every frame with Metal.
 
+## Get started
+
+You build the app yourself. There is no download.
+
+1. You need macOS 15 or later and the Xcode Command Line Tools (`xcode-select --install`). Full Xcode is not needed.
+2. Clone the repository and open it in Terminal:
+   ```sh
+   git clone https://github.com/dotslashsimran/notscreenstudio.git
+   cd notscreenstudio
+   ```
+3. Run `./scripts/make-dev-cert.sh` **once**, before your first build. It gives every build the same signature, so macOS keeps the Screen Recording permission across rebuilds and never shows duplicate entries.
+4. Run `./scripts/bundle.sh`. It builds the app and creates `build/NotScreenStudio.app`.
+5. Run `open build/NotScreenStudio.app`. A circle icon appears in the menu bar.
+6. Click the icon, open **Permissions…**, and allow Screen Recording, Camera and Microphone. Then relaunch the app once. macOS only applies Screen Recording to a new process.
+
+**Keep one copy of the app**, the one in `build/NotScreenStudio.app`. Do not copy it to Applications or anywhere else. Each copy can show up as a separate entry in the Screen Recording settings, and macOS may ask for permission again for each one.
+
 ## Features
 
 ### Recording
@@ -219,6 +236,16 @@ A `.nssproj` is a normal folder. You can use Show Package Contents in Finder to 
 **Recording fails, or the source list is empty.**
 Open **Permissions…** and check that Screen Recording, Camera and Microphone are allowed. Quit and reopen the app after allowing Screen Recording. If you rebuilt the app, remove it from the three lists in System Settings, add it again and restart it (see [Permissions](#permissions)), or use `./scripts/make-dev-cert.sh` once so rebuilds keep their permissions.
 
+**Screen Recording asks again and again, or the list in System Settings has stale entries.**
+Do this one-time fix. Quit the app, then run:
+
+```sh
+tccutil reset ScreenCapture dev.notscreenstudio.app
+defaults delete dev.notscreenstudio.app notscreenstudio.shell.askedScreenRecording
+```
+
+Open the app again, click Allow once when macOS asks, and relaunch the app. If you have not yet run `./scripts/make-dev-cert.sh`, run it first, so later rebuilds keep the permission.
+
 **Screen Recording still says it is not allowed.**
 Start the app from Terminal with `NSS_PERMISSION_DEBUG=1 /path/to/NotScreenStudio.app/Contents/MacOS/NotScreenStudio`. It prints, to stderr, the preflight result, the exact ScreenCaptureKit result (error code -3801 means macOS has not granted this build), the bundle path and id, and the code signature (identifier, cdhash, flags). If `adhoc=true` and the cdhash changed since you allowed it, the build is a new app to macOS: use the stable identity above. Run it from Terminal only for diagnosis, because a program started from Terminal can be judged by the permissions of Terminal. Open the app normally with `open` for real use.
 
@@ -293,6 +320,13 @@ GitHub Actions runs on every pull request and on pushes to `main`. It runs on `m
 - The recorder can capture system audio, but the app has no switch for it yet. Recordings contain your microphone only.
 - Export is MP4 only, at 60 fps, in 1080p or 4K.
 - There is no packaged release. You build the app yourself.
+
+## Contributing
+
+1. Fork the repository and create a branch.
+2. Make your change. Run `swift build` and `swift test` (add `-j 2` on a small Mac).
+3. Open a pull request against `main`. The CI check must pass.
+4. Read [AGENTS.md](AGENTS.md) first. It has the coding rules.
 
 ## Video credits
 
