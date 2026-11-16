@@ -8,9 +8,23 @@ Click the preview to watch the launch video with sound ([docs/launch-preview.mp4
 
 The app is written in Swift 6 with SwiftUI, and it draws every frame with Metal.
 
+## Download
+
+You do not need to build the app. Download it from [GitHub Releases](https://github.com/dotslashsimran/notscreenstudio/releases).
+
+1. Download `notscreenstudio-<version>-macos.zip` from the latest release and unzip it. The app runs on Apple silicon and Intel Macs (macOS 15 or later). To check the file, download the `.sha256` file too and run `shasum -a 256 -c notscreenstudio-<version>-macos.zip.sha256` in the same folder.
+2. Move `NotScreenStudio.app` to your Applications folder.
+3. Open it. The download is not notarized yet, so macOS blocks the first launch with a warning. Do one of these:
+   - Right-click the app, choose **Open**, then click **Open** again.
+   - Or open **System Settings > Privacy & Security**, scroll down and click **Open Anyway** next to the message about NotScreenStudio.
+   - Or run this in Terminal: `xattr -dr com.apple.quarantine /Applications/NotScreenStudio.app`
+4. A circle icon appears in the menu bar. Click it, open **Permissions…**, and allow Screen Recording, Camera and Microphone. Then relaunch the app once. macOS only applies Screen Recording to a new process.
+
+Keep one copy of the app, in Applications. Because the download is signed ad hoc, a newer version may ask for the permissions again. See [Troubleshooting](#troubleshooting) if Screen Recording keeps asking.
+
 ## Get started
 
-You build the app yourself. There is no download.
+This section is for building the app from source.
 
 1. You need macOS 15 or later and the Xcode Command Line Tools (`xcode-select --install`). Full Xcode is not needed.
 2. Clone the repository and open it in Terminal:
@@ -307,6 +321,23 @@ You can also run the self check yourself: `swift run NotScreenStudio --smoke-tes
 
 GitHub Actions runs on every pull request and on pushes to `main`. It runs on `macos-15`: `swift build`, `swift test` and the app smoke test.
 
+### Releases
+
+Pushing a tag that starts with `v` (for example `v0.1.0`) runs the Release workflow. It builds a universal app (arm64 and x86_64), runs the smoke test, and creates a **draft** GitHub Release with the zip and a `.sha256` file. Nothing is published until you publish the draft. Write the notes first in `docs/releases/<tag>.md`. To build the same zip on your Mac, run `./scripts/package.sh v0.1.0`. It writes `dist/notscreenstudio-0.1.0-macos.zip`.
+
+By default the release is signed ad hoc and needs no secrets. To sign with a Developer ID certificate and notarize, add all of these repository secrets (Settings > Secrets and variables > Actions). If any is missing, the workflow falls back to ad hoc signing.
+
+| Secret | Value |
+| --- | --- |
+| `MACOS_CERTIFICATE_P12` | The Developer ID Application certificate as a `.p12` file, encoded with `base64 -i cert.p12` |
+| `MACOS_CERTIFICATE_PASSWORD` | The password of the `.p12` file |
+| `MACOS_SIGN_IDENTITY` | The identity name, for example `Developer ID Application: Your Name (TEAMID)` |
+| `NOTARY_APPLE_ID` | The Apple ID used for notarization |
+| `NOTARY_TEAM_ID` | Your Apple developer team ID |
+| `NOTARY_APP_PASSWORD` | An app-specific password for that Apple ID |
+
+With these set, the app is signed with the hardened runtime (the camera and microphone entitlements are in `scripts/entitlements.plist`), notarized with `notarytool`, and stapled.
+
 ### Project documents
 
 - [AGENTS.md](AGENTS.md): coding rules for contributors.
@@ -319,7 +350,7 @@ GitHub Actions runs on every pull request and on pushes to `main`. It runs on `m
 - Rebuilding the app can reset its permissions, because the app is signed ad hoc (see [Permissions](#permissions)).
 - The recorder can capture system audio, but the app has no switch for it yet. Recordings contain your microphone only.
 - Export is MP4 only, at 60 fps, in 1080p or 4K.
-- There is no packaged release. You build the app yourself.
+- The downloads on GitHub Releases are not notarized yet and are signed ad hoc, so macOS warns on first launch (see [Download](#download)). You can also build the app yourself.
 
 ## Contributing
 

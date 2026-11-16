@@ -32,7 +32,9 @@ export NSS_VERSION="${VERSION%%[-+]*}"
 export NSS_BUILD_NUMBER="$BUILD_NUMBER"
 export NSS_OUT_DIR="$BUILD_DIR"
 export NSS_ARCHS="${NSS_ARCHS:-arm64 x86_64}"
-if [ -n "${NSS_SIGN_IDENTITY:-}" ]; then export NSS_HARDENED=1; fi
+# Releases are ad hoc signed unless an identity is given (never the local notscreenstudio-dev identity).
+export NSS_SIGN_IDENTITY="${NSS_SIGN_IDENTITY:--}"
+if [ "$NSS_SIGN_IDENTITY" != "-" ]; then export NSS_HARDENED=1; fi
 
 ./scripts/bundle.sh
 
@@ -40,7 +42,7 @@ mkdir -p "$DIST"
 rm -f "$ZIP" "$ZIP.sha256"
 
 if [ -n "${NSS_NOTARY_PROFILE:-}" ]; then
-  [ -n "${NSS_SIGN_IDENTITY:-}" ] || { echo "Notarization needs NSS_SIGN_IDENTITY" >&2; exit 1; }
+  [ "$NSS_SIGN_IDENTITY" != "-" ] || { echo "Notarization needs NSS_SIGN_IDENTITY" >&2; exit 1; }
   SUBMIT_ZIP="$(mktemp -d)/submit.zip"
   ditto -c -k --keepParent "$APP" "$SUBMIT_ZIP"
   xcrun notarytool submit "$SUBMIT_ZIP" --keychain-profile "$NSS_NOTARY_PROFILE" --wait

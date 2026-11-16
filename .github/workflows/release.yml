@@ -1,0 +1,93 @@
+name: Release
+
+# Builds a downloadable app zip and creates a DRAFT GitHub Release. Nothing is published automatically.
+# Optional Developer ID signing and notarization run only when ALL of these repository secrets exist:
+#   MACOS_CERTIFICATE_P12       base64 of the Developer ID Application certificate (.p12)
+#   MACOS_CERTIFICATE_PASSWORD  password of the .p12
+#   MACOS_SIGN_IDENTITY         for example: Developer ID Application: Your Name (TEAMID)
+#   NOTARY_APPLE_ID             Apple ID used for notarization
+#   NOTARY_TEAM_ID              Apple developer team ID
+#   NOTARY_APP_PASSWORD         app-specific password for that Apple ID
+# Without them the app is signed ad hoc.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Version tag to build, for example v0.1.0 (must have docs/releases/<tag>.md for notes)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-15
+    env:
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+      HAS_SIGNING: ${{ secrets.MACOS_CERTIFICATE_P12 != '' && secrets.MACOS_CERTIFICATE_PASSWORD != '' && secrets.MACOS_SIGN_IDENTITY != '' && secrets.NOTARY_APPLE_ID != '' && secrets.NOTARY_TEAM_ID != '' && secrets.NOTARY_APP_PASSWORD != '' }}
+    steps:
+      - uses: actions/checkout@v4.2.2
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: Swift version
+        run: swift --version
+
+      - name: Import Developer ID certificate (optional)
+        if: env.HAS_SIGNING == 'true'
+        env:
+          CERT_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          CERT_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          NOTARY_APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
+          NOTARY_TEAM_ID: ${{ secrets.NOTARY_TEAM_ID }}
+          NOTARY_APP_PASSWORD: ${{ secrets.NOTARY_APP_PASSWORD }}
+          SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+        run: |
+          KEYCHAIN="$RUNNER_TEMP/release.keychain-db"
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+          echo "$CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 3600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/cert.p12" -P "$CERT_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          rm -f "$RUNNER_TEMP/cert.p12"
+          xcrun notarytool store-credentials notary-profile \
+            --apple-id "$NOTARY_APPLE_ID" --team-id "$NOTARY_TEAM_ID" --password "$NOTARY_APP_PASSWORD" \
+            --keychain "$KEYCHAIN"
+          echo "NSS_SIGN_IDENTITY=$SIGN_IDENTITY" >> "$GITHUB_ENV"
+          echo "NSS_NOTARY_PROFILE=notary-profile" >> "$GITHUB_ENV"
+
+      - name: Build and package (runs the smoke test)
+        run: ./scripts/package.sh "$TAG"
+
+      - name: Check the package
+        run: |
+          ls -l dist
+          (cd dist && shasum -a 256 -c ./*.sha256)
+          rm -rf "$RUNNER_TEMP/unzipped" && mkdir "$RUNNER_TEMP/unzipped"
+          ditto -x -k dist/*.zip "$RUNNER_TEMP/unzipped"
+          codesign --verify --deep --strict --verbose=2 "$RUNNER_TEMP/unzipped/NotScreenStudio.app"
+          lipo -info "$RUNNER_TEMP/unzipped/NotScreenStudio.app/Contents/MacOS/NotScreenStudio"
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4.6.2
+        with:
+          name: notscreenstudio-${{ env.TAG }}-macos
+          path: dist/*
+
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          NOTES="docs/releases/${TAG}.md"
+          if [ ! -f "$NOTES" ]; then echo "Missing $NOTES"; exit 1; fi
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --clobber
+          else
+            gh release create "$TAG" dist/* --draft --verify-tag --title "notscreenstudio ${TAG}" --notes-file "$NOTES"
+          fi
