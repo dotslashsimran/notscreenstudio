@@ -7,9 +7,19 @@ set -euo pipefail
 NAME="notscreenstudio-dev"
 KEYCHAIN="$HOME/Library/Keychains/login.keychain-db"
 
-if security find-identity -p codesigning 2>/dev/null | grep -q "\"$NAME\""; then
-  echo "Identity \"$NAME\" already exists. Nothing to do."
+# Capture first so `grep -q` closing the pipe cannot trip pipefail. Same check as scripts/bundle.sh.
+VALID="$(security find-identity -v -p codesigning 2>/dev/null || true)"
+ALL="$(security find-identity -p codesigning 2>/dev/null || true)"
+if printf '%s\n' "$VALID" | grep -q "\"$NAME\""; then
+  echo "Identity \"$NAME\" already exists and is valid for code signing. Nothing to do."
   exit 0
+fi
+if printf '%s\n' "$ALL" | grep -q "\"$NAME\""; then
+  echo "An identity named \"$NAME\" exists but is NOT valid for code signing, so bundle.sh will not use it." >&2
+  echo "Usually the certificate is not trusted for code signing. To fix it, either:" >&2
+  echo "  - open Keychain Access, find \"$NAME\", Get Info > Trust > Code Signing: Always Trust, or" >&2
+  echo "  - delete it (Keychain Access, or: security delete-identity -c \"$NAME\") and run this script again." >&2
+  exit 1
 fi
 
 echo "This will add a self-signed code-signing certificate \"$NAME\" to your login keychain."

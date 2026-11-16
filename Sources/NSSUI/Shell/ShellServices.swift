@@ -263,6 +263,14 @@ public struct StubSourceProvider: CaptureSourceProviding {
     public func cameras() -> [DeviceItem] { cams }
 }
 
+public final class ProbeCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = 0
+    public init() {}
+    public var count: Int { lock.lock(); defer { lock.unlock() }; return value }
+    func increment() { lock.lock(); value += 1; lock.unlock() }
+}
+
 /// Inert permissions for tests and previews. Nothing here touches the system.
 public struct StubPermissions: PermissionsProviding {
     public var states: [PermissionKind: PermissionState]
@@ -280,7 +288,12 @@ public struct StubPermissions: PermissionsProviding {
         self.requestResults = requestResults
         self.probeResults = probeResults
     }
-    public func probe(_ kind: PermissionKind) async -> PermissionState { probeResults[kind] ?? status(of: kind) }
+    /// Counts `probe` calls so tests can check that quick repeated clicks run one probe.
+    public let probeCounter = ProbeCounter()
+    public func probe(_ kind: PermissionKind) async -> PermissionState {
+        probeCounter.increment()
+        return probeResults[kind] ?? status(of: kind)
+    }
     public func status(of kind: PermissionKind) -> PermissionState { states[kind] ?? .notDetermined }
     public func request(_ kind: PermissionKind) async -> PermissionState { requestResults[kind] ?? status(of: kind) }
     public func openSettings(for kind: PermissionKind) {}

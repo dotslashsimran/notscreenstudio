@@ -399,6 +399,7 @@ import NSSCore
         rig.model.beginSetup()
         rig.model.beginSetup()
         await rig.model.setupProbeTask?.value
+        #expect(rig.probeCounter.count == 1)
         #expect(rig.effects.setupBarShowCount == 1)
         #expect(rig.model.onboardingRequestID == 0)
     }
